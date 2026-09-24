@@ -1,0 +1,9 @@
+Build a small app that pulls sandbox patient data from EHR developer APIs and shows it in a dashboard. 
+Use the public HAPI FHIR R4 server (no auth) and Cerner/Oracle Health's open sandbox as the two required sources. 
+Add Epic's sandbox as a third if you can get through their SMART on FHIR registration in time; if you can't, write up how far you got and what the auth flow looks like. athenahealth and others are optional.
+
+For each source, pull patients plus at least conditions and medications, store them in Postgres, and handle pagination and any rate limits. 
+Running the sync twice shouldn't create duplicate patients. 
+The dashboard should let me toggle between EHRs, see the patient list, and open one patient to see everything you pulled for them.
+
+Deliverable is a Vercel link, the repo, and a short README covering how you approached each vendor's API, how you modeled the data, and what you'd change for a real hospital with 25,000 patients.
