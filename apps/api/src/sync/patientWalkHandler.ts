@@ -11,12 +11,14 @@ import {
   RESOURCE_TYPE_MEDICATION_REQUEST,
   RESOURCE_TYPE_PATIENT,
 } from './resourceTypes';
+import type { RetryContext } from './retryContext';
+import { recordTaskFailure } from './taskFailure';
 import { bulkUpsertPatients, bulkUpsertRaw } from './upsert';
 
 // Processes exactly one Patient search page, then either re-enqueues itself for the next page or,
 // on the last page, marks the task COMPLETED and creates+enqueues the Condition/MedicationRequest
 // tasks — this is the "last patient page triggers the clinical tasks" handoff from the plan.
-export async function processPatientPage(jobId: string): Promise<void> {
+export async function processPatientPage(jobId: string, retry: RetryContext): Promise<void> {
   const job = await prisma.syncJob.findUnique({ where: { id: jobId } });
   if (!job) return;
 
@@ -30,69 +32,76 @@ export async function processPatientPage(jobId: string): Promise<void> {
   });
   if (!task || (task.status !== 'PENDING' && task.status !== 'RUNNING') || !task.cursorUrl) return;
 
-  const { resources, nextUrl } = await fetchPage<FhirPatient>(task.cursorUrl);
+  let nextUrl: string | null;
+  try {
+    const { resources, nextUrl: fetchedNextUrl } = await fetchPage<FhirPatient>(task.cursorUrl);
+    nextUrl = fetchedNextUrl;
 
-  const normalized = resources.map((raw) => {
-    try {
-      return { ok: true as const, raw, value: normalizePatient(raw) };
-    } catch (error) {
-      return { ok: false as const, raw, error };
-    }
-  });
+    const normalized = resources.map((raw) => {
+      try {
+        return { ok: true as const, raw, value: normalizePatient(raw) };
+      } catch (error) {
+        return { ok: false as const, raw, error };
+      }
+    });
 
-  await prisma.$transaction(async (tx) => {
-    await bulkUpsertRaw(
-      tx,
-      job.source,
-      RESOURCE_TYPE_PATIENT,
-      jobId,
-      resources.map((raw) => ({
-        fhirId: raw.id,
-        raw,
-        sourceLastUpdated: raw.meta?.lastUpdated ? new Date(raw.meta.lastUpdated) : null,
-      })),
-    );
-
-    const okItems = normalized.filter((n) => n.ok).map((n) => n.value);
-    const { created, updated } = await bulkUpsertPatients(tx, job.source, okItems);
-
-    const failedItems = normalized.filter((n) => !n.ok);
-    if (failedItems.length > 0) {
-      await tx.syncJobEvent.createMany({
-        data: failedItems.map((n) => ({
-          jobId,
-          level: 'warn',
-          message: `Failed to normalize Patient ${n.raw.id}`,
-          context: { error: n.error instanceof Error ? n.error.message : String(n.error) },
-        })),
-      });
-    }
-
-    await tx.syncJobStat.upsert({
-      where: { jobId_resourceType: { jobId, resourceType: RESOURCE_TYPE_PATIENT } },
-      create: {
+    await prisma.$transaction(async (tx) => {
+      await bulkUpsertRaw(
+        tx,
+        job.source,
+        RESOURCE_TYPE_PATIENT,
         jobId,
-        resourceType: RESOURCE_TYPE_PATIENT,
-        fetched: resources.length,
-        created,
-        updated,
-        failed: failedItems.length,
-      },
-      update: {
-        fetched: { increment: resources.length },
-        created: { increment: created },
-        updated: { increment: updated },
-        failed: { increment: failedItems.length },
-      },
-    });
+        resources.map((raw) => ({
+          fhirId: raw.id,
+          raw,
+          sourceLastUpdated: raw.meta?.lastUpdated ? new Date(raw.meta.lastUpdated) : null,
+        })),
+      );
 
-    await tx.syncTask.update({
-      where: { id: task.id },
-      data: nextUrl
-        ? { cursorUrl: nextUrl, status: 'RUNNING' }
-        : { cursorUrl: null, status: 'COMPLETED' },
+      const okItems = normalized.filter((n) => n.ok).map((n) => n.value);
+      const { created, updated } = await bulkUpsertPatients(tx, job.source, okItems);
+
+      const failedItems = normalized.filter((n) => !n.ok);
+      if (failedItems.length > 0) {
+        await tx.syncJobEvent.createMany({
+          data: failedItems.map((n) => ({
+            jobId,
+            level: 'warn',
+            message: `Failed to normalize Patient ${n.raw.id}`,
+            context: { error: n.error instanceof Error ? n.error.message : String(n.error) },
+          })),
+        });
+      }
+
+      await tx.syncJobStat.upsert({
+        where: { jobId_resourceType: { jobId, resourceType: RESOURCE_TYPE_PATIENT } },
+        create: {
+          jobId,
+          resourceType: RESOURCE_TYPE_PATIENT,
+          fetched: resources.length,
+          created,
+          updated,
+          failed: failedItems.length,
+        },
+        update: {
+          fetched: { increment: resources.length },
+          created: { increment: created },
+          updated: { increment: updated },
+          failed: { increment: failedItems.length },
+        },
+      });
+
+      await tx.syncTask.update({
+        where: { id: task.id },
+        data: nextUrl
+          ? { cursorUrl: nextUrl, status: 'RUNNING', attempts: 0, lastError: null }
+          : { cursorUrl: null, status: 'COMPLETED', attempts: 0, lastError: null },
+      });
     });
-  });
+  } catch (error) {
+    await recordTaskFailure(task.id, jobId, retry, error);
+    throw error; // let pg-boss apply its own tier-2 retry/backoff for this delivery
+  }
 
   if (nextUrl) {
     await boss.send(QUEUE_PATIENT_PAGE, { jobId });

@@ -20,7 +20,7 @@ export async function postStartSync(req: Request, res: Response, next: NextFunct
       return;
     }
     const job = await triggerSync(source);
-    res.status(202).json({ jobId: job.id });
+    res.status(202).json({ jobId: job.id, displayId: job.displayId });
   } catch (error) {
     if (error instanceof InvalidSourceError) {
       res.status(400).json({ error: error.message });

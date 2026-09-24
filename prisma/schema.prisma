@@ -159,6 +159,9 @@ model SyncMissingPatientRef {
 
 model SyncJob {
   id              String                   @id @default(uuid())
+  /// Short, sequential, human-friendly identifier for display in the UI — the UUID `id` stays
+  /// the primary/foreign key everywhere else.
+  displayId       Int                      @unique @default(autoincrement())
   source          EhrSource
   status          SyncJobStatus            @default(PENDING)
   triggeredBy     String?

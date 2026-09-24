@@ -1,0 +1,64 @@
+import { AppBar, Box, Button, Toolbar, Typography } from '@mui/material';
+import type { ReactNode } from 'react';
+import { Link, useLocation } from 'react-router';
+
+interface AppShellProps {
+  children: ReactNode;
+}
+
+export function AppShell({ children }: AppShellProps) {
+  const location = useLocation();
+
+  return (
+    <Box
+      sx={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        bgcolor: 'background.default',
+      }}
+    >
+      <AppBar position="static" elevation={1} sx={{ flexShrink: 0 }}>
+        <Toolbar>
+          <Typography
+            variant="h6"
+            component={Link}
+            to="/"
+            sx={{ flexGrow: 1, color: 'inherit', textDecoration: 'none' }}
+          >
+            EHR Sync
+          </Typography>
+          <Button
+            color="inherit"
+            component={Link}
+            to="/"
+            sx={{ fontWeight: location.pathname === '/' ? 700 : 400 }}
+          >
+            Patients
+          </Button>
+          <Button
+            color="inherit"
+            component={Link}
+            to="/control-panel"
+            sx={{ fontWeight: location.pathname === '/control-panel' ? 700 : 400 }}
+          >
+            Control Panel
+          </Button>
+        </Toolbar>
+      </AppBar>
+      <Box
+        component="main"
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          p: 3,
+        }}
+      >
+        {children}
+      </Box>
+    </Box>
+  );
+}
