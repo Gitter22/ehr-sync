@@ -15,3 +15,192 @@ model ConnectivityCheck {
   source    String
   createdAt DateTime @default(now())
 }
+
+enum EhrSource {
+  HAPI_FHIR
+  ORACLE_HEALTH
+  EPIC
+}
+
+enum SyncJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  PARTIAL
+  CANCELLED
+}
+
+enum SyncTaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum MissingPatientStatus {
+  PENDING
+  RESOLVED
+  FAILED
+}
+
+/// Single source of truth for the exact payload the source API returned.
+/// Written unconditionally, for every resource type, with no dependency on
+/// anything else — this is what makes the missing-patient reconciliation possible.
+model RawFhirResource {
+  id                String    @id @default(uuid())
+  source            EhrSource
+  resourceType      String
+  fhirId            String
+  raw               Json
+  sourceLastUpdated DateTime?
+  fetchedAt         DateTime  @default(now())
+  syncJobId         String?
+
+  @@unique([source, resourceType, fhirId])
+}
+
+/// Fields limited to what `_summary=data` actually returns (see specs/*.json samples).
+model Patient {
+  id                 String    @id @default(uuid())
+  source             EhrSource
+  fhirId             String
+  identifierSystem   String?
+  identifierValue    String?
+  active             Boolean?
+  fullName           String?
+  familyName         String?
+  givenName          String?
+  gender             String?
+  birthDate          DateTime?
+  sourceVersionId    String?
+  sourceLastUpdated  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  conditions         Condition[]
+  medicationRequests MedicationRequest[]
+
+  @@unique([source, fhirId])
+}
+
+model Condition {
+  id                 String    @id @default(uuid())
+  source             EhrSource
+  fhirId             String
+  patientId          String
+  patient            Patient   @relation(fields: [patientId], references: [id])
+  codeText           String?
+  codeSystem         String?
+  codeValue          String?
+  clinicalStatus     String?
+  verificationStatus String?
+  encounterReference String?
+  sourceVersionId    String?
+  sourceLastUpdated  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([source, fhirId])
+  @@index([patientId])
+}
+
+model MedicationRequest {
+  id                 String    @id @default(uuid())
+  source             EhrSource
+  fhirId             String
+  patientId          String
+  patient            Patient   @relation(fields: [patientId], references: [id])
+  medicationText     String?
+  status             String?
+  intent             String?
+  dosageText         String?
+  dosageRouteText    String?
+  encounterReference String?
+  sourceVersionId    String?
+  sourceLastUpdated  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([source, fhirId])
+  @@index([patientId])
+}
+
+/// One row per resource type per job. Condition/MedicationRequest rows are
+/// created only once the Patient task reaches COMPLETED.
+model SyncTask {
+  id           String         @id @default(uuid())
+  jobId        String
+  job          SyncJob        @relation(fields: [jobId], references: [id])
+  resourceType String
+  cursorUrl    String?
+  status       SyncTaskStatus @default(PENDING)
+  attempts     Int            @default(0)
+  lastError    String?
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([jobId, resourceType])
+}
+
+/// A patient referenced by a Condition/MedicationRequest but not yet locally
+/// saved, for this job. Drained by the backfill step.
+model SyncMissingPatientRef {
+  id            String               @id @default(uuid())
+  jobId         String
+  job           SyncJob              @relation(fields: [jobId], references: [id])
+  source        EhrSource
+  patientFhirId String
+  status        MissingPatientStatus @default(PENDING)
+  discoveredAt  DateTime             @default(now())
+  resolvedAt    DateTime?
+
+  @@unique([jobId, patientFhirId])
+}
+
+model SyncJob {
+  id              String                   @id @default(uuid())
+  source          EhrSource
+  status          SyncJobStatus            @default(PENDING)
+  triggeredBy     String?
+  /// `_lastUpdated` watermark used by every task in this run, computed once at job start
+  /// (the last successful job's startedAt) so Patient/Condition/MedicationRequest all filter
+  /// consistently even though Condition/MedicationRequest tasks are created later.
+  watermark       DateTime?
+  /// True once every task (Patient, Condition, MedicationRequest) reached COMPLETED — i.e. every
+  /// page of the search was scanned — independent of whether individual malformed records failed
+  /// to normalize. This, not `status`, is what the next run's watermark computation checks: a
+  /// PARTIAL job (some bad records) still fully scanned its search results and is a safe
+  /// incremental checkpoint; a job where a task itself FAILED did not, and is not.
+  allTasksCompleted Boolean                @default(false)
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  errorMessage    String?
+  createdAt       DateTime                 @default(now())
+  tasks           SyncTask[]
+  stats           SyncJobStat[]
+  events          SyncJobEvent[]
+  missingPatients SyncMissingPatientRef[]
+}
+
+model SyncJobStat {
+  id           String  @id @default(uuid())
+  jobId        String
+  job          SyncJob @relation(fields: [jobId], references: [id])
+  resourceType String
+  fetched      Int     @default(0)
+  created      Int     @default(0)
+  updated      Int     @default(0)
+  failed       Int     @default(0)
+
+  @@unique([jobId, resourceType])
+}
+
+model SyncJobEvent {
+  id        String   @id @default(uuid())
+  jobId     String
+  job       SyncJob  @relation(fields: [jobId], references: [id])
+  level     String
+  message   String
+  context   Json?
+  createdAt DateTime @default(now())
+}

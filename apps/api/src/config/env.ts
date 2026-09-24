@@ -19,4 +19,5 @@ export const env = {
   databaseUrl: required('DATABASE_URL'),
   pythonServiceUrl: process.env.PYTHON_SERVICE_URL ?? 'http://localhost:8000',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+  hapiFhirBaseUrl: process.env.HAPI_FHIR_BASE_URL ?? 'https://hapi.fhir.org/baseR4',
 };
