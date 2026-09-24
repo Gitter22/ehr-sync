@@ -1,3 +1,5 @@
+import { ProviderNotConfiguredError } from '../fhir/providers/types';
+import { UnsupportedProviderError } from '../fhir/providers/registry';
 import { prisma } from '../lib/prisma';
 import { SyncJobInProgressError, startSyncJob } from '../sync/orchestrator';
 import { retrySyncJob } from '../sync/retryFailedTasks';
@@ -24,6 +26,9 @@ export async function triggerSync(source: string) {
   } catch (error) {
     if (error instanceof SyncJobInProgressError) {
       throw new JobAlreadyInProgressError(error.existingJobId);
+    }
+    if (error instanceof UnsupportedProviderError || error instanceof ProviderNotConfiguredError) {
+      throw new InvalidSourceError(error.message);
     }
     throw error;
   }

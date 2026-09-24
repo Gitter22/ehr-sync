@@ -1,7 +1,6 @@
-import { fetchPage } from '../fhir/pagination';
+import { getProvider } from '../fhir/providers/registry';
 import type { FhirPatient } from '../fhir/types';
 import { prisma } from '../lib/prisma';
-import { normalizePatient } from '../normalize/patient';
 import { markTaskCancelledIfNeeded } from './cancellation';
 import { recomputeJobStatus } from './completionCheck';
 import { buildResourceSearchUrl } from './orchestrator';
@@ -32,14 +31,17 @@ export async function processPatientPage(jobId: string, retry: RetryContext): Pr
   });
   if (!task || (task.status !== 'PENDING' && task.status !== 'RUNNING') || !task.cursorUrl) return;
 
+  const provider = getProvider(job.source);
   let nextUrl: string | null;
   try {
-    const { resources, nextUrl: fetchedNextUrl } = await fetchPage<FhirPatient>(task.cursorUrl);
+    const { resources, nextUrl: fetchedNextUrl } = await provider.fetchPage<FhirPatient>(
+      task.cursorUrl,
+    );
     nextUrl = fetchedNextUrl;
 
     const normalized = resources.map((raw) => {
       try {
-        return { ok: true as const, raw, value: normalizePatient(raw) };
+        return { ok: true as const, raw, value: provider.normalizePatient(raw) };
       } catch (error) {
         return { ok: false as const, raw, error };
       }
@@ -108,10 +110,14 @@ export async function processPatientPage(jobId: string, retry: RetryContext): Pr
     return;
   }
 
-  await onPatientWalkComplete(jobId, job.watermark);
+  await onPatientWalkComplete(jobId, job.source, job.watermark);
 }
 
-async function onPatientWalkComplete(jobId: string, watermark: Date | null): Promise<void> {
+async function onPatientWalkComplete(
+  jobId: string,
+  source: string,
+  watermark: Date | null,
+): Promise<void> {
   for (const resourceType of [RESOURCE_TYPE_CONDITION, RESOURCE_TYPE_MEDICATION_REQUEST]) {
     // Idempotent: if a duplicate delivery re-runs this after the tasks were already created,
     // skip rather than error or duplicate.
@@ -125,7 +131,7 @@ async function onPatientWalkComplete(jobId: string, watermark: Date | null): Pro
         jobId,
         resourceType,
         status: 'PENDING',
-        cursorUrl: buildResourceSearchUrl(resourceType, watermark),
+        cursorUrl: buildResourceSearchUrl(source, resourceType, watermark),
       },
     });
     await boss.send(QUEUE_CLINICAL_PAGE, { jobId, resourceType });

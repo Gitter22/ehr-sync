@@ -1,11 +1,9 @@
-import { fetchPage } from '../fhir/pagination';
+import { getProvider } from '../fhir/providers/registry';
+import type { FhirProvider } from '../fhir/providers/types';
 import type { FhirCondition, FhirMedicationRequest, FhirResource } from '../fhir/types';
 import { prisma } from '../lib/prisma';
-import { normalizeCondition, type NormalizedCondition } from '../normalize/condition';
-import {
-  normalizeMedicationRequest,
-  type NormalizedMedicationRequest,
-} from '../normalize/medicationRequest';
+import type { NormalizedCondition } from '../normalize/condition';
+import type { NormalizedMedicationRequest } from '../normalize/medicationRequest';
 import { markTaskCancelledIfNeeded } from './cancellation';
 import { recomputeJobStatus } from './completionCheck';
 import { boss, QUEUE_BACKFILL, QUEUE_CLINICAL_PAGE } from './queue';
@@ -23,12 +21,13 @@ import {
 type NormalizedClinicalRecord = NormalizedCondition | NormalizedMedicationRequest;
 
 function normalizeOne(
+  provider: FhirProvider,
   resourceType: ClinicalResourceType,
   raw: FhirResource,
 ): NormalizedClinicalRecord {
   return resourceType === RESOURCE_TYPE_CONDITION
-    ? normalizeCondition(raw as FhirCondition)
-    : normalizeMedicationRequest(raw as FhirMedicationRequest);
+    ? provider.normalizeCondition(raw as FhirCondition)
+    : provider.normalizeMedicationRequest(raw as FhirMedicationRequest);
 }
 
 // Processes one page for a Condition or MedicationRequest task — queried globally, filtered by
@@ -53,17 +52,18 @@ export async function processClinicalPage(
   });
   if (!task || (task.status !== 'PENDING' && task.status !== 'RUNNING') || !task.cursorUrl) return;
 
+  const provider = getProvider(job.source);
   let nextUrl: string | null;
   let missingPatientCount = 0;
 
   try {
-    const page = await fetchPage(task.cursorUrl);
+    const page = await provider.fetchPage(task.cursorUrl);
     const resources = page.resources;
     nextUrl = page.nextUrl;
 
     const normalized = resources.map((raw) => {
       try {
-        return { ok: true as const, raw, value: normalizeOne(resourceType, raw) };
+        return { ok: true as const, raw, value: normalizeOne(provider, resourceType, raw) };
       } catch (error) {
         return { ok: false as const, raw, error };
       }

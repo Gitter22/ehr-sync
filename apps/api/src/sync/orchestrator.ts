@@ -1,6 +1,5 @@
 import { Prisma } from '../../../../generated/prisma';
-import { env } from '../config/env';
-import { buildSearchUrl } from '../fhir/pagination';
+import { getProvider } from '../fhir/providers/registry';
 import { prisma } from '../lib/prisma';
 import { boss, QUEUE_PATIENT_PAGE } from './queue';
 import { RESOURCE_TYPE_PATIENT } from './resourceTypes';
@@ -25,12 +24,12 @@ async function computeWatermark(source: string): Promise<Date | null> {
   return lastJob?.startedAt ?? null;
 }
 
-export function buildResourceSearchUrl(resourceType: string, watermark: Date | null): string {
-  const params: Record<string, string> = {};
-  if (watermark) {
-    params['_lastUpdated'] = `gt${watermark.toISOString()}`;
-  }
-  return buildSearchUrl(env.hapiFhirBaseUrl, resourceType, params);
+export function buildResourceSearchUrl(
+  source: string,
+  resourceType: string,
+  watermark: Date | null,
+): string {
+  return getProvider(source).buildSearchUrl(resourceType, watermark);
 }
 
 export async function startSyncJob(source: string, triggeredBy = 'manual') {
@@ -63,7 +62,7 @@ export async function startSyncJob(source: string, triggeredBy = 'manual') {
           jobId: created.id,
           resourceType: RESOURCE_TYPE_PATIENT,
           status: 'PENDING',
-          cursorUrl: buildResourceSearchUrl(RESOURCE_TYPE_PATIENT, watermark),
+          cursorUrl: buildResourceSearchUrl(source, RESOURCE_TYPE_PATIENT, watermark),
         },
       });
       return created;

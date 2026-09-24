@@ -1,11 +1,7 @@
 import { Prisma } from '../../../../generated/prisma';
-import { hapiClient } from '../fhir/hapiClient';
-import { fhirRateLimiter } from '../fhir/rateLimiter';
-import type { FhirCondition, FhirMedicationRequest, FhirPatient } from '../fhir/types';
+import { getProvider } from '../fhir/providers/registry';
+import type { FhirCondition, FhirMedicationRequest } from '../fhir/types';
 import { prisma } from '../lib/prisma';
-import { normalizeCondition } from '../normalize/condition';
-import { normalizeMedicationRequest } from '../normalize/medicationRequest';
-import { normalizePatient } from '../normalize/patient';
 import { recomputeJobStatus } from './completionCheck';
 import {
   bulkUpsertConditions,
@@ -37,13 +33,9 @@ export async function processBackfill(jobId: string): Promise<void> {
     if (current?.status === 'CANCELLED') return;
 
     try {
-      const response = await fhirRateLimiter.schedule(() =>
-        hapiClient.get<FhirPatient>(`/Patient/${ref.patientFhirId}`, {
-          params: { _summary: 'data' },
-        }),
-      );
-      const raw = response.data;
-      const normalizedPatient = normalizePatient(raw);
+      const provider = getProvider(ref.source);
+      const raw = await provider.fetchPatientById(ref.patientFhirId);
+      const normalizedPatient = provider.normalizePatient(raw);
 
       await prisma.$transaction(async (tx) => {
         await bulkUpsertRaw(tx, ref.source, 'Patient', jobId, [
@@ -85,6 +77,7 @@ async function reconcilePatientClinicalData(
   });
   if (!patient) return;
 
+  const provider = getProvider(source);
   const subjectReference = `Patient/${patientFhirId}`;
 
   const rawConditions = await tx.$queryRaw<{ fhirId: string; raw: unknown }[]>`
@@ -93,10 +86,13 @@ async function reconcilePatientClinicalData(
       AND (r.raw -> 'subject' ->> 'reference') = ${subjectReference}
       AND NOT EXISTS (SELECT 1 FROM "Condition" c WHERE c.source = r.source AND c."fhirId" = r."fhirId")
   `;
-  const conditionItems = normalizeSafely<FhirCondition, ReturnType<typeof normalizeCondition>>(
-    rawConditions,
-    normalizeCondition,
-  ).map((item) => ({ ...item, patientId: patient.id }));
+  const conditionItems = normalizeSafely<
+    FhirCondition,
+    ReturnType<typeof provider.normalizeCondition>
+  >(rawConditions, provider.normalizeCondition).map((item) => ({
+    ...item,
+    patientId: patient.id,
+  }));
   await bulkUpsertConditions(tx, source, conditionItems);
 
   const rawMedications = await tx.$queryRaw<{ fhirId: string; raw: unknown }[]>`
@@ -107,8 +103,11 @@ async function reconcilePatientClinicalData(
   `;
   const medicationItems = normalizeSafely<
     FhirMedicationRequest,
-    ReturnType<typeof normalizeMedicationRequest>
-  >(rawMedications, normalizeMedicationRequest).map((item) => ({ ...item, patientId: patient.id }));
+    ReturnType<typeof provider.normalizeMedicationRequest>
+  >(rawMedications, provider.normalizeMedicationRequest).map((item) => ({
+    ...item,
+    patientId: patient.id,
+  }));
   await bulkUpsertMedicationRequests(tx, source, medicationItems);
 
   if (conditionItems.length === 0 && medicationItems.length === 0) return;
