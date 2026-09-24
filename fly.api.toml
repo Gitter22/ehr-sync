@@ -8,7 +8,10 @@ primary_region = "iad"
 
 [env]
   NODE_ENV = "production"
-  API_PORT = "3000"
+  # API_PORT is intentionally NOT set here: apps/api reads it via config/env.ts and would bind to
+  # whatever value this holds, so it must always match `http_service.internal_port` below exactly.
+  # Leaving it unset lets the app fall back to its own default (3000), with `internal_port` as the
+  # single source of truth for that port instead of two values that have to be kept in sync.
   # PYTHON_SERVICE_URL and DATABASE_URL are set as Fly secrets/env per environment
   # (they point at the deployed ehr-sync-python app and managed Postgres respectively).
 

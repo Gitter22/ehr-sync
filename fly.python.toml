@@ -7,7 +7,9 @@ primary_region = "iad"
   dockerfile = "Dockerfile.python"
 
 [env]
-  PYTHON_PORT = "8000"
+  # PYTHON_PORT is intentionally NOT set here: Dockerfile.python's CMD hardcodes the internal
+  # port to 8000 regardless, so setting it would be dead weight implying configurability that
+  # doesn't exist. `http_service.internal_port` below is the single source of truth for this port.
   # DATABASE_URL is set as a Fly secret.
 
 [http_service]
