@@ -248,6 +248,11 @@ directly), using Docker-based builds:
 - `fly.web.toml` → `ehr-sync-web`, built from `Dockerfile.web` (nginx serving the static build;
   `VITE_API_URL` is passed as a Fly build arg pointing at the deployed API's public URL)
 
+`fly.api.toml` sets `[deploy] release_command = "npx prisma migrate deploy ..."`, so migrations run
+automatically before each `ehr-sync-api` deploy takes traffic (Fly's equivalent of the Compose
+stack's one-shot `migrate` service) — you don't need to run migrations separately against
+production.
+
 Deploy each from the repo root, e.g.:
 
 ```bash

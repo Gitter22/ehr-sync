@@ -26,8 +26,14 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci --omit=dev --workspace apps/api --ignore-scripts
+# `prisma` itself is a root devDependency (only needed here for `migrate deploy` via
+# release_command, not by the running app) — install it explicitly rather than pulling in the
+# rest of the root devDependencies (typescript, eslint, etc.) that --omit=dev correctly excludes.
+RUN npm install --no-save --omit=dev prisma@6
 COPY --from=build /repo/generated/prisma /repo/generated/prisma
 COPY --from=build /repo/apps/api/dist /repo/apps/api/dist
+COPY prisma prisma
+COPY prisma.config.ts ./
 
 EXPOSE 3000
 CMD ["node", "apps/api/dist/server.js"]

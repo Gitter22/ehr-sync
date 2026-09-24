@@ -6,6 +6,11 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile.api"
 
+[deploy]
+  # Runs once, in a fresh machine from the new image, before traffic is cut over to it.
+  # Safe to run on every deploy: `migrate deploy` is a no-op when there's nothing pending.
+  release_command = "npx prisma migrate deploy --config prisma.config.ts"
+
 [env]
   NODE_ENV = "production"
   # API_PORT is intentionally NOT set here: apps/api reads it via config/env.ts and would bind to
