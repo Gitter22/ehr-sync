@@ -1,0 +1,31 @@
+# Fly.io app config for the Node API service.
+# Deploy from the repo root: fly deploy --config fly.api.toml
+app = "ehr-sync-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.api"
+
+[env]
+  NODE_ENV = "production"
+  API_PORT = "3000"
+  # PYTHON_SERVICE_URL and DATABASE_URL are set as Fly secrets/env per environment
+  # (they point at the deployed ehr-sync-python app and managed Postgres respectively).
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

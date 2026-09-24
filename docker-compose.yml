@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ehr_sync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ehr_sync}
+      POSTGRES_DB: ${POSTGRES_DB:-ehr_sync}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ehr_sync}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: build
+    command: npx prisma migrate deploy --config prisma.config.ts
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ehr_sync}:${POSTGRES_PASSWORD:-ehr_sync}@postgres:5432/${POSTGRES_DB:-ehr_sync}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    environment:
+      # API_PORT is intentionally NOT injected here: the container always listens on the fixed
+      # internal port 3000 below (matching postgres/python's pattern) — ${API_PORT:-3000} in
+      # `ports:` only ever remaps the HOST side. Injecting API_PORT here would make the app
+      # listen on a different internal port than what the healthcheck/port mapping expect.
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ehr_sync}:${POSTGRES_PASSWORD:-ehr_sync}@postgres:5432/${POSTGRES_DB:-ehr_sync}
+      PYTHON_SERVICE_URL: http://python:8000
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+    ports:
+      - '${API_PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      python:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    restart: unless-stopped
+    environment:
+      # PYTHON_PORT is intentionally NOT injected here: Dockerfile.python's CMD hardcodes the
+      # internal port to 8000 regardless, so passing it would be a no-op that implies
+      # configurability that doesn't exist. ${PYTHON_PORT:-8000} below only remaps the HOST side.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ehr_sync}:${POSTGRES_PASSWORD:-ehr_sync}@postgres:5432/${POSTGRES_DB:-ehr_sync}
+    ports:
+      - '${PYTHON_PORT:-8000}:8000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_API_URL: http://localhost:${API_PORT:-3000}
+    restart: unless-stopped
+    ports:
+      - '${WEB_PORT:-5173}:80'
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

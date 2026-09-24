@@ -1,0 +1,23 @@
+# Fly.io app config for the React web app (built + served via nginx).
+# Deploy from the repo root: fly deploy --config fly.web.toml
+app = "ehr-sync-web"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.web"
+
+[build.args]
+  # Baked into the client bundle at build time — must be the public URL of the
+  # deployed ehr-sync-api Fly app.
+  VITE_API_URL = "https://ehr-sync-api.fly.dev"
+
+[http_service]
+  internal_port = 80
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

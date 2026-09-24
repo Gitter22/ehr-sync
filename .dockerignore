@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/build
+**/.venv
+**/__pycache__
+**/*.pyc
+.git
+.env
+.env.*.local
+generated/prisma
+*.md
+.husky

@@ -1,0 +1,33 @@
+node_modules/
+dist/
+build/
+generated/prisma/
+
+# env
+.env
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+
+# editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# python
+apps/python/.venv/
+apps/python/__pycache__/
+**/__pycache__/
+*.pyc
+.ruff_cache/
+
+# testing/coverage
+coverage/
+
+# fly
+fly.toml.bak

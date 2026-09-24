@@ -1,0 +1,61 @@
+{
+  "name": "ehr-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "EHR Sync — scaffold for a FHIR/EHR to Oracle synchronization platform",
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:python": "cd apps/python && uv run python -m app.main",
+    "build": "npm run build --workspace apps/web && npm run build --workspace apps/api",
+    "build:web": "npm run build --workspace apps/web",
+    "build:api": "npm run build --workspace apps/api",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck --workspace apps/web && npm run typecheck --workspace apps/api",
+    "test": "npm run test --workspace apps/api --if-present && npm run test --workspace apps/web --if-present",
+    "prisma:generate": "prisma generate --config prisma.config.ts",
+    "prisma:migrate": "prisma migrate dev --config prisma.config.ts",
+    "prisma:migrate:deploy": "prisma migrate deploy --config prisma.config.ts",
+    "prisma:validate": "prisma validate --config prisma.config.ts",
+    "prisma:seed": "tsx prisma/seed.ts",
+    "postinstall": "npm run prisma:generate",
+    "prepare": "husky",
+    "check:python": "cd apps/python && uv run ruff check . && uv run ruff format --check . && uv run mypy app",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm run prisma:validate && npm run check:python"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "eslint": "^9.15.0",
+    "dotenv": "^16.4.7",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.16.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix"
+    ],
+    "*.{ts,tsx,js,jsx,json,md,yml,yaml,css}": [
+      "prettier --write"
+    ]
+  }
+}

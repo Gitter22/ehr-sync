@@ -1,0 +1,17 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Minimal table used only to prove Node <-> Postgres <-> Python connectivity.
+/// Domain/business tables (patients, conditions, medications, etc.) come later.
+model ConnectivityCheck {
+  id        String   @id @default(uuid())
+  source    String
+  createdAt DateTime @default(now())
+}

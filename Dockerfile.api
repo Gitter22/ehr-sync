@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+FROM node:24-slim AS base
+WORKDIR /repo
+# Prisma's query engine binary is linked against OpenSSL; node:24-slim doesn't include it.
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+
+FROM base AS deps
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN npm ci --ignore-scripts
+
+FROM deps AS build
+COPY prisma prisma
+COPY prisma.config.ts tsconfig.base.json ./
+COPY apps/api apps/api
+RUN npx prisma generate --config prisma.config.ts
+RUN npm run build --workspace apps/api
+
+FROM node:24-slim AS runtime
+WORKDIR /repo
+ENV NODE_ENV=production
+# The copied generated/prisma query engine binary needs OpenSSL at runtime too.
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN npm ci --omit=dev --workspace apps/api --ignore-scripts
+COPY --from=build /repo/generated/prisma /repo/generated/prisma
+COPY --from=build /repo/apps/api/dist /repo/apps/api/dist
+
+EXPOSE 3000
+CMD ["node", "apps/api/dist/server.js"]
