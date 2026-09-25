@@ -6,6 +6,7 @@ import { RESOURCE_TYPE_CONDITION, type ClinicalResourceType } from './resourceTy
 // "Queue backend" section. Swapping to BullMQ+Redis later only touches this file.
 export const QUEUE_PATIENT_PAGE = 'sync:patient-page';
 export const QUEUE_BACKFILL = 'sync:backfill';
+export const QUEUE_SOURCE_RESET = 'sync:source-reset';
 // Condition and MedicationRequest each get their own queue (and own boss.work() registration in
 // workers.ts) so the two resource types make real concurrent progress instead of sharing one
 // single-consumer queue — every row either resource type's handler writes (RawFhirResource,
@@ -27,6 +28,7 @@ export function queueForClinicalBatch(resourceType: ClinicalResourceType): strin
 const QUEUES = [
   QUEUE_PATIENT_PAGE,
   QUEUE_BACKFILL,
+  QUEUE_SOURCE_RESET,
   QUEUE_CONDITION_PAGE,
   QUEUE_MEDICATION_PAGE,
   QUEUE_CONDITION_BATCH,

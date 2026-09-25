@@ -19,6 +19,7 @@ import {
   TablePagination,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -29,6 +30,7 @@ import {
 } from '../api/patients';
 import { TablePaginationActions } from '../components/TablePaginationActions';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { formatDateTime } from '../utils/formatDateTime';
 
 export function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -211,6 +213,16 @@ function ConditionsTab({ patientId }: { patientId: string }) {
                 <TableCell>Clinical status</TableCell>
                 <TableCell>FHIR ID</TableCell>
                 <TableCell>Source</TableCell>
+                <TableCell>
+                  <Tooltip title="When this app last saved this record">
+                    <span>Last updated</span>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  <Tooltip title="When the source system says this record last changed">
+                    <span>Source last updated</span>
+                  </Tooltip>
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -222,11 +234,13 @@ function ConditionsTab({ patientId }: { patientId: string }) {
                   <TableCell>
                     <Chip label={condition.source} size="small" />
                   </TableCell>
+                  <TableCell>{formatDateTime(condition.updatedAt)}</TableCell>
+                  <TableCell>{formatDateTime(condition.sourceLastUpdated)}</TableCell>
                 </TableRow>
               ))}
               {!isLoading && (data?.rows.length ?? 0) === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4}>
+                  <TableCell colSpan={6}>
                     <Box sx={{ py: 4, textAlign: 'center' }}>
                       <Typography color="text.secondary">No conditions found</Typography>
                     </Box>
@@ -342,6 +356,16 @@ function MedicationsTab({ patientId }: { patientId: string }) {
                 <TableCell>Status</TableCell>
                 <TableCell>FHIR ID</TableCell>
                 <TableCell>Source</TableCell>
+                <TableCell>
+                  <Tooltip title="When this app last saved this record">
+                    <span>Last updated</span>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  <Tooltip title="When the source system says this record last changed">
+                    <span>Source last updated</span>
+                  </Tooltip>
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -353,11 +377,13 @@ function MedicationsTab({ patientId }: { patientId: string }) {
                   <TableCell>
                     <Chip label={medication.source} size="small" />
                   </TableCell>
+                  <TableCell>{formatDateTime(medication.updatedAt)}</TableCell>
+                  <TableCell>{formatDateTime(medication.sourceLastUpdated)}</TableCell>
                 </TableRow>
               ))}
               {!isLoading && (data?.rows.length ?? 0) === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4}>
+                  <TableCell colSpan={6}>
                     <Box sx={{ py: 4, textAlign: 'center' }}>
                       <Typography color="text.secondary">No medication requests found</Typography>
                     </Box>

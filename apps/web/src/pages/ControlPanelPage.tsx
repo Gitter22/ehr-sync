@@ -43,6 +43,7 @@ import {
   type SyncJob,
   type SyncJobStatus,
 } from '../api/sync';
+import { SourceResetPanel } from '../components/SourceResetPanel';
 import { useConnectivityStore } from '../store/connectivityStore';
 
 const SOURCE_OPTIONS: { value: EhrSource; label: string; available: boolean }[] = [
@@ -323,6 +324,8 @@ export function ControlPanelPage() {
       </Paper>
 
       <ConnectivityCheckPanel />
+
+      <SourceResetPanel />
 
       <JobDetailDialog jobId={detailJobId} onClose={() => setDetailJobId(null)} />
     </Container>

@@ -13,6 +13,7 @@ import {
   triggerSync,
   type TriggerSyncInput,
 } from '../services/syncService';
+import { hasActiveSourceReset } from '../services/sourceResetService';
 
 export async function postStartSync(req: Request, res: Response, next: NextFunction) {
   try {
@@ -39,6 +40,13 @@ export async function postStartSync(req: Request, res: Response, next: NextFunct
       return;
     }
     const input: TriggerSyncInput = { lastUpdatedOverride, maxRecords };
+
+    if (await hasActiveSourceReset(source)) {
+      res.status(409).json({
+        error: 'A data reset is in progress for this source — try again once it finishes',
+      });
+      return;
+    }
 
     const job = await triggerSync(source, input);
     res.status(202).json({ jobId: job.id, displayId: job.displayId });

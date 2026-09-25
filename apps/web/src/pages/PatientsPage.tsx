@@ -16,11 +16,13 @@ import {
   TablePagination,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { fetchPatients } from '../api/patients';
 import { TablePaginationActions } from '../components/TablePaginationActions';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { formatDateTime } from '../utils/formatDateTime';
 
 const SOURCE_OPTIONS = [
   { value: '', label: 'All sources' },
@@ -28,6 +30,12 @@ const SOURCE_OPTIONS = [
   { value: 'ORACLE_HEALTH', label: 'Oracle Health' },
   { value: 'EPIC', label: 'Epic' },
 ];
+
+// Fixed-layout column widths (Source, FHIR ID, Full name, Gender, Birth date, Conditions,
+// Medications, Last updated, Source last updated) — sum to 100% so the table always fits its
+// container; long text wraps instead of forcing a horizontal scrollbar.
+const COLUMN_WIDTHS = ['12%', '9%', '13%', '5%', '9%', '10%', '10%', '16%', '16%'];
+const WRAP_TEXT_SX = { overflowWrap: 'anywhere' } as const;
 
 export function PatientsPage() {
   const navigate = useNavigate();
@@ -112,8 +120,13 @@ export function PatientsPage() {
         variant="outlined"
         sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       >
-        <TableContainer sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-          <Table size="small" stickyHeader>
+        <TableContainer sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+          <Table size="small" stickyHeader sx={{ tableLayout: 'fixed', width: '100%' }}>
+            <colgroup>
+              {COLUMN_WIDTHS.map((width, i) => (
+                <col key={i} style={{ width }} />
+              ))}
+            </colgroup>
             <TableHead>
               <TableRow>
                 <TableCell>Source</TableCell>
@@ -123,6 +136,16 @@ export function PatientsPage() {
                 <TableCell>Birth date</TableCell>
                 <TableCell align="right">Conditions</TableCell>
                 <TableCell align="right">Medications</TableCell>
+                <TableCell>
+                  <Tooltip title="When this app last saved this record">
+                    <span>Last updated</span>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  <Tooltip title="When the source system says this record last changed">
+                    <span>Source last updated</span>
+                  </Tooltip>
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -136,19 +159,21 @@ export function PatientsPage() {
                   <TableCell>
                     <Chip label={patient.source} size="small" />
                   </TableCell>
-                  <TableCell>{patient.fhirId}</TableCell>
-                  <TableCell>{patient.fullName ?? '—'}</TableCell>
+                  <TableCell sx={WRAP_TEXT_SX}>{patient.fhirId}</TableCell>
+                  <TableCell sx={WRAP_TEXT_SX}>{patient.fullName ?? '—'}</TableCell>
                   <TableCell>{patient.gender ?? '—'}</TableCell>
                   <TableCell>
                     {patient.birthDate ? new Date(patient.birthDate).toLocaleDateString() : '—'}
                   </TableCell>
                   <TableCell align="right">{patient.conditionCount}</TableCell>
                   <TableCell align="right">{patient.medicationRequestCount}</TableCell>
+                  <TableCell>{formatDateTime(patient.updatedAt)}</TableCell>
+                  <TableCell>{formatDateTime(patient.sourceLastUpdated)}</TableCell>
                 </TableRow>
               ))}
               {!isLoading && (data?.rows.length ?? 0) === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7}>
+                  <TableCell colSpan={9}>
                     <Box sx={{ py: 4, textAlign: 'center' }}>
                       <Typography color="text.secondary">No patients found</Typography>
                     </Box>

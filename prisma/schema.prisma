@@ -240,3 +240,28 @@ model SyncJobEvent {
   context   Json?
   createdAt DateTime @default(now())
 }
+
+enum SourceResetStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// Audit trail of destructive per-source wipes (Control Panel "Reset ... data"). Deliberately not
+/// scoped to the source's own data and never deleted by a reset — it is the record that the wipe
+/// happened, what it removed, and whether it finished.
+model SourceResetAudit {
+  id           String            @id @default(uuid())
+  displayId    Int               @unique @default(autoincrement())
+  source       EhrSource
+  status       SourceResetStatus @default(PENDING)
+  triggeredBy  String?
+  /// Row counts removed per table, plus the displayIds of the sync jobs that were wiped — filled
+  /// once the reset completes.
+  deleted      Json?
+  errorMessage String?
+  requestedAt  DateTime          @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+}

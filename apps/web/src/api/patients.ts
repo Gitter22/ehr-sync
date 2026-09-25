@@ -34,6 +34,8 @@ export interface Condition {
   verificationStatus: string | null;
   encounterReference: string | null;
   createdAt: string;
+  sourceLastUpdated: string | null;
+  updatedAt: string;
 }
 
 export interface MedicationRequest {
@@ -48,6 +50,8 @@ export interface MedicationRequest {
   dosageRouteText: string | null;
   encounterReference: string | null;
   createdAt: string;
+  sourceLastUpdated: string | null;
+  updatedAt: string;
 }
 
 export interface PaginatedResult<T> {

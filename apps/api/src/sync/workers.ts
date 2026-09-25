@@ -1,4 +1,5 @@
 import type PgBoss from 'pg-boss';
+import { executeSourceReset } from '../services/sourceResetService';
 import { processBackfill } from './backfillHandler';
 import { processClinicalBatch } from './clinicalBatchHandler';
 import { processClinicalPage } from './clinicalWalkHandler';
@@ -11,6 +12,7 @@ import {
   QUEUE_MEDICATION_BATCH,
   QUEUE_MEDICATION_PAGE,
   QUEUE_PATIENT_PAGE,
+  QUEUE_SOURCE_RESET,
 } from './queue';
 import type { ClinicalResourceType } from './resourceTypes';
 import type { RetryContext } from './retryContext';
@@ -26,6 +28,10 @@ interface ClinicalPageData {
 
 interface BackfillData {
   jobId: string;
+}
+
+interface SourceResetData {
+  auditId: string;
 }
 
 interface ClinicalBatchData {
@@ -85,6 +91,12 @@ export async function registerWorkers(): Promise<void> {
   await boss.work<ClinicalBatchData>(QUEUE_MEDICATION_BATCH, WORK_OPTIONS, async (jobs) => {
     for (const job of jobs) {
       await processClinicalBatch(job.data.batchId, retryContextOf(job));
+    }
+  });
+
+  await boss.work<SourceResetData>(QUEUE_SOURCE_RESET, WORK_OPTIONS, async (jobs) => {
+    for (const job of jobs) {
+      await executeSourceReset(job.data.auditId);
     }
   });
 }
