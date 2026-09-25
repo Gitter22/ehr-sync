@@ -17,6 +17,10 @@ export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: Number(process.env.API_PORT ?? 3000),
   databaseUrl: required('DATABASE_URL'),
+  // Connection caps per API process. A small managed Postgres (e.g. a 256MB Fly VM) can't afford
+  // Prisma's default pool (cpus*2+1) plus pg-boss's default 10 on every machine, so keep both low.
+  prismaConnectionLimit: Number(process.env.PRISMA_CONNECTION_LIMIT ?? 8),
+  pgBossPoolMax: Number(process.env.PGBOSS_POOL_MAX ?? 4),
   pythonServiceUrl: process.env.PYTHON_SERVICE_URL ?? 'http://localhost:8000',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   hapiFhirBaseUrl: process.env.HAPI_FHIR_BASE_URL ?? 'https://hapi.fhir.org/baseR4',

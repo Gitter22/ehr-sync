@@ -35,7 +35,7 @@ const QUEUES = [
   QUEUE_MEDICATION_BATCH,
 ];
 
-export const boss = new PgBoss({ connectionString: env.databaseUrl });
+export const boss = new PgBoss({ connectionString: env.databaseUrl, max: env.pgBossPoolMax });
 
 let started = false;
 

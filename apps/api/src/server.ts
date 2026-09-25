@@ -5,8 +5,27 @@ import { registerWorkers } from './sync/workers';
 
 const app = createApp();
 
+// The database can be briefly unavailable (restart, out of connections) when the API boots. Retry
+// with a growing delay instead of exiting, so the machine doesn't burn through Fly's restart limit.
+async function startQueueWithRetry(attempts = 8): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await startQueue();
+      return;
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      const delayMs = Math.min(30_000, 2_000 * 2 ** (attempt - 1));
+      console.error(
+        `Queue start failed (attempt ${attempt}/${attempts}), retrying in ${delayMs}ms`,
+        error,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 async function main() {
-  await startQueue();
+  await startQueueWithRetry();
   await registerWorkers();
 
   const server = app.listen(env.port, () => {
