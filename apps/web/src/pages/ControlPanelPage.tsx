@@ -27,6 +27,11 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import { runConnectivityCheck } from '../api/connectivity';
 import {
+  checkHapiHealth,
+  checkOracleHealth,
+  type ProviderHealthResult,
+} from '../api/providerHealth';
+import {
   ACTIVE_JOB_STATUSES,
   cancelSyncJob,
   fetchSyncJobDetail,
@@ -483,14 +488,42 @@ function JobDetailDialog({ jobId, onClose }: { jobId: string | null; onClose: ()
   );
 }
 
+function ProviderHealthResultRow({
+  label,
+  result,
+}: {
+  label: string;
+  result: ProviderHealthResult;
+}) {
+  return (
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+      <Typography variant="body2" sx={{ minWidth: 90 }}>
+        {label}
+      </Typography>
+      <Chip
+        label={result.status}
+        color={result.status === 'ok' ? 'success' : 'error'}
+        size="small"
+      />
+      <Typography variant="body2" color="text.secondary">
+        {result.httpStatus != null ? `HTTP ${result.httpStatus} · ` : ''}
+        {result.latencyMs}ms
+        {result.message ? ` · ${result.message}` : ''}
+      </Typography>
+    </Stack>
+  );
+}
+
 function ConnectivityCheckPanel() {
   const lastResult = useConnectivityStore((state) => state.lastResult);
   const setLastResult = useConnectivityStore((state) => state.setLastResult);
 
-  const mutation = useMutation({
+  const connectivityMutation = useMutation({
     mutationFn: runConnectivityCheck,
     onSuccess: setLastResult,
   });
+  const hapiMutation = useMutation({ mutationFn: checkHapiHealth });
+  const oracleMutation = useMutation({ mutationFn: checkOracleHealth });
 
   return (
     <Paper variant="outlined" sx={{ p: 3 }}>
@@ -498,36 +531,76 @@ function ConnectivityCheckPanel() {
         Connectivity check
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Verifies React → Node API → PostgreSQL → Python service → PostgreSQL → Node API → React.
+        Verifies the backend can reach its own database. The two buttons below separately check
+        whether HAPI FHIR and Oracle Health are reachable right now — a single request each, no
+        retries.
       </Typography>
 
-      <Button variant="outlined" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-        {mutation.isPending ? 'Running…' : 'Run connectivity test'}
-      </Button>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+        <Button
+          variant="outlined"
+          onClick={() => connectivityMutation.mutate()}
+          disabled={connectivityMutation.isPending}
+        >
+          {connectivityMutation.isPending ? 'Running…' : 'Run connectivity test'}
+        </Button>
+        <Button
+          variant="outlined"
+          onClick={() => hapiMutation.mutate()}
+          disabled={hapiMutation.isPending}
+        >
+          {hapiMutation.isPending ? 'Checking…' : 'Check HAPI FHIR health'}
+        </Button>
+        <Button
+          variant="outlined"
+          onClick={() => oracleMutation.mutate()}
+          disabled={oracleMutation.isPending}
+        >
+          {oracleMutation.isPending ? 'Checking…' : 'Check Oracle Health health'}
+        </Button>
+      </Stack>
 
-      {mutation.isError && (
+      {connectivityMutation.isError && (
         <Alert severity="error" sx={{ mt: 2 }}>
-          {mutation.error instanceof Error ? mutation.error.message : 'Request failed'}
+          {connectivityMutation.error instanceof Error
+            ? connectivityMutation.error.message
+            : 'Request failed'}
+        </Alert>
+      )}
+      {hapiMutation.isError && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {hapiMutation.error instanceof Error ? hapiMutation.error.message : 'Request failed'}
+        </Alert>
+      )}
+      {oracleMutation.isError && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {oracleMutation.error instanceof Error ? oracleMutation.error.message : 'Request failed'}
         </Alert>
       )}
 
-      {lastResult && (
-        <Stack spacing={1} sx={{ mt: 2 }}>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Typography variant="subtitle2">Overall</Typography>
-            <Chip
-              label={lastResult.overall}
-              color={lastResult.overall === 'ok' ? 'success' : 'error'}
-              size="small"
-            />
-          </Stack>
-          <Typography variant="body2" color="text.secondary">
-            Node API — status: {lastResult.api.status} · database: {lastResult.api.database}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Python service — status: {lastResult.python.status} · database:{' '}
-            {lastResult.python.database}
-          </Typography>
+      {(lastResult || hapiMutation.data || oracleMutation.data) && (
+        <Stack spacing={1.5} sx={{ mt: 2 }}>
+          {lastResult && (
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Typography variant="body2" sx={{ minWidth: 90 }}>
+                Backend
+              </Typography>
+              <Chip
+                label={lastResult.overall}
+                color={lastResult.overall === 'ok' ? 'success' : 'error'}
+                size="small"
+              />
+              <Typography variant="body2" color="text.secondary">
+                database: {lastResult.api.database}
+              </Typography>
+            </Stack>
+          )}
+          {hapiMutation.data && (
+            <ProviderHealthResultRow label="HAPI FHIR" result={hapiMutation.data} />
+          )}
+          {oracleMutation.data && (
+            <ProviderHealthResultRow label="Oracle Health" result={oracleMutation.data} />
+          )}
         </Stack>
       )}
     </Paper>

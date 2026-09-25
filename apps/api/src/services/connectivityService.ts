@@ -1,19 +1,15 @@
 import { prisma } from '../lib/prisma';
-import { checkPythonConnectivity } from './pythonClient';
 
 export interface ConnectivityReport {
   api: { status: 'ok' | 'error'; database: 'connected' | 'disconnected'; message?: string };
-  python: { status: 'ok' | 'error'; database: 'connected' | 'disconnected'; message?: string };
   overall: 'ok' | 'error';
 }
 
+// Proves Node API -> PostgreSQL connectivity only — see the ConnectivityCheck model's doc comment
+// in schema.prisma. Does not touch apps/python; that integration is out of scope here.
 export async function runConnectivityCheck(): Promise<ConnectivityReport> {
   const apiResult = await checkApiDatabase();
-  const pythonResult = await checkPythonConnectivity();
-
-  const overall = apiResult.status === 'ok' && pythonResult.status === 'ok' ? 'ok' : 'error';
-
-  return { api: apiResult, python: pythonResult, overall };
+  return { api: apiResult, overall: apiResult.status };
 }
 
 async function checkApiDatabase(): Promise<ConnectivityReport['api']> {
