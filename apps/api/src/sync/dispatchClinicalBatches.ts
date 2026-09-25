@@ -1,6 +1,6 @@
 import { createSyncLogger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
-import { boss, QUEUE_CLINICAL_BATCH } from './queue';
+import { boss, queueForClinicalBatch } from './queue';
 import {
   RESOURCE_TYPE_CONDITION,
   RESOURCE_TYPE_MEDICATION_REQUEST,
@@ -40,7 +40,7 @@ export async function dispatchClinicalBatches(jobId: string): Promise<void> {
     batchSize: BATCH_SIZE,
   });
 
-  for (const resourceType of [RESOURCE_TYPE_CONDITION, RESOURCE_TYPE_MEDICATION_REQUEST]) {
+  for (const resourceType of [RESOURCE_TYPE_CONDITION, RESOURCE_TYPE_MEDICATION_REQUEST] as const) {
     // Idempotent — same guard used by the 'global' dispatch path.
     const existingTask = await prisma.syncTask.findUnique({
       where: { jobId_resourceType: { jobId, resourceType } },
@@ -74,7 +74,7 @@ export async function dispatchClinicalBatches(jobId: string): Promise<void> {
       select: { id: true },
     });
     for (const batch of createdBatches) {
-      await boss.send(QUEUE_CLINICAL_BATCH, { batchId: batch.id });
+      await boss.send(queueForClinicalBatch(resourceType), { batchId: batch.id });
     }
     log.info('batches enqueued', { jobId, resourceType, batchCount: createdBatches.length });
   }

@@ -6,8 +6,10 @@ import { processPatientPage } from './patientWalkHandler';
 import {
   boss,
   QUEUE_BACKFILL,
-  QUEUE_CLINICAL_BATCH,
-  QUEUE_CLINICAL_PAGE,
+  QUEUE_CONDITION_BATCH,
+  QUEUE_CONDITION_PAGE,
+  QUEUE_MEDICATION_BATCH,
+  QUEUE_MEDICATION_PAGE,
   QUEUE_PATIENT_PAGE,
 } from './queue';
 import type { ClinicalResourceType } from './resourceTypes';
@@ -44,6 +46,11 @@ function retryContextOf(job: { retryCount: number; retryLimit: number }): RetryC
   return { retryCount: job.retryCount, retryLimit: job.retryLimit };
 }
 
+// Condition and MedicationRequest each get their own queue + worker loop below, so the two
+// resource types make real concurrent progress instead of competing for one shared queue's single
+// consumer (see queueForClinicalPage/queueForClinicalBatch's doc comment in queue.ts for why this
+// is safe — every row either resource type writes is keyed by resourceType, no shared row).
+
 export async function registerWorkers(): Promise<void> {
   await boss.work<PatientPageData>(QUEUE_PATIENT_PAGE, WORK_OPTIONS, async (jobs) => {
     for (const job of jobs) {
@@ -51,7 +58,13 @@ export async function registerWorkers(): Promise<void> {
     }
   });
 
-  await boss.work<ClinicalPageData>(QUEUE_CLINICAL_PAGE, WORK_OPTIONS, async (jobs) => {
+  await boss.work<ClinicalPageData>(QUEUE_CONDITION_PAGE, WORK_OPTIONS, async (jobs) => {
+    for (const job of jobs) {
+      await processClinicalPage(job.data.jobId, job.data.resourceType, retryContextOf(job));
+    }
+  });
+
+  await boss.work<ClinicalPageData>(QUEUE_MEDICATION_PAGE, WORK_OPTIONS, async (jobs) => {
     for (const job of jobs) {
       await processClinicalPage(job.data.jobId, job.data.resourceType, retryContextOf(job));
     }
@@ -63,7 +76,13 @@ export async function registerWorkers(): Promise<void> {
     }
   });
 
-  await boss.work<ClinicalBatchData>(QUEUE_CLINICAL_BATCH, WORK_OPTIONS, async (jobs) => {
+  await boss.work<ClinicalBatchData>(QUEUE_CONDITION_BATCH, WORK_OPTIONS, async (jobs) => {
+    for (const job of jobs) {
+      await processClinicalBatch(job.data.batchId, retryContextOf(job));
+    }
+  });
+
+  await boss.work<ClinicalBatchData>(QUEUE_MEDICATION_BATCH, WORK_OPTIONS, async (jobs) => {
     for (const job of jobs) {
       await processClinicalBatch(job.data.batchId, retryContextOf(job));
     }

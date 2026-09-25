@@ -1,16 +1,37 @@
 import PgBoss from 'pg-boss';
 import { env } from '../config/env';
+import { RESOURCE_TYPE_CONDITION, type ClinicalResourceType } from './resourceTypes';
 
 // The only backend-specific module for the sync job queue — see the sync engine plan's
 // "Queue backend" section. Swapping to BullMQ+Redis later only touches this file.
 export const QUEUE_PATIENT_PAGE = 'sync:patient-page';
-export const QUEUE_CLINICAL_PAGE = 'sync:clinical-page';
 export const QUEUE_BACKFILL = 'sync:backfill';
-// 'per-patient'-scoped providers (Oracle) only — one shared queue for both Condition and
-// MedicationRequest batches for now; split alongside QUEUE_CLINICAL_PAGE in a later pass.
-export const QUEUE_CLINICAL_BATCH = 'sync:clinical-batch';
+// Condition and MedicationRequest each get their own queue (and own boss.work() registration in
+// workers.ts) so the two resource types make real concurrent progress instead of sharing one
+// single-consumer queue — every row either resource type's handler writes (RawFhirResource,
+// Condition/MedicationRequest tables, SyncJobStat, SyncTask, SyncClinicalBatch) is keyed by
+// resourceType, so there's no shared row between them to contend over.
+export const QUEUE_CONDITION_PAGE = 'sync:condition-page'; // HAPI ('global'-scoped) page walk
+export const QUEUE_MEDICATION_PAGE = 'sync:medication-page';
+export const QUEUE_CONDITION_BATCH = 'sync:condition-batch'; // Oracle ('per-patient'-scoped) batches
+export const QUEUE_MEDICATION_BATCH = 'sync:medication-batch';
 
-const QUEUES = [QUEUE_PATIENT_PAGE, QUEUE_CLINICAL_PAGE, QUEUE_BACKFILL, QUEUE_CLINICAL_BATCH];
+export function queueForClinicalPage(resourceType: ClinicalResourceType): string {
+  return resourceType === RESOURCE_TYPE_CONDITION ? QUEUE_CONDITION_PAGE : QUEUE_MEDICATION_PAGE;
+}
+
+export function queueForClinicalBatch(resourceType: ClinicalResourceType): string {
+  return resourceType === RESOURCE_TYPE_CONDITION ? QUEUE_CONDITION_BATCH : QUEUE_MEDICATION_BATCH;
+}
+
+const QUEUES = [
+  QUEUE_PATIENT_PAGE,
+  QUEUE_BACKFILL,
+  QUEUE_CONDITION_PAGE,
+  QUEUE_MEDICATION_PAGE,
+  QUEUE_CONDITION_BATCH,
+  QUEUE_MEDICATION_BATCH,
+];
 
 export const boss = new PgBoss({ connectionString: env.databaseUrl });
 

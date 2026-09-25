@@ -7,7 +7,7 @@ import { recomputeJobStatus } from './completionCheck';
 import { dispatchClinicalBatches } from './dispatchClinicalBatches';
 import { isMaxRecordsReached } from './maxRecordsGuard';
 import { buildResourceSearchUrl } from './orchestrator';
-import { boss, QUEUE_CLINICAL_PAGE, QUEUE_PATIENT_PAGE } from './queue';
+import { boss, queueForClinicalPage, QUEUE_PATIENT_PAGE } from './queue';
 import {
   RESOURCE_TYPE_CONDITION,
   RESOURCE_TYPE_MEDICATION_REQUEST,
@@ -149,7 +149,7 @@ async function onPatientWalkComplete(
     return;
   }
 
-  for (const resourceType of [RESOURCE_TYPE_CONDITION, RESOURCE_TYPE_MEDICATION_REQUEST]) {
+  for (const resourceType of [RESOURCE_TYPE_CONDITION, RESOURCE_TYPE_MEDICATION_REQUEST] as const) {
     // Idempotent: if a duplicate delivery re-runs this after the tasks were already created,
     // skip rather than error or duplicate.
     const existing = await prisma.syncTask.findUnique({
@@ -166,7 +166,7 @@ async function onPatientWalkComplete(
       },
     });
     log.info('clinical task created', { jobId, resourceType });
-    await boss.send(QUEUE_CLINICAL_PAGE, { jobId, resourceType });
+    await boss.send(queueForClinicalPage(resourceType), { jobId, resourceType });
   }
 
   await recomputeJobStatus(jobId);

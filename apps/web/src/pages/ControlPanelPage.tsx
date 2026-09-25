@@ -21,6 +21,7 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -356,9 +357,22 @@ function JobDetailDialog({ jobId, onClose }: { jobId: string | null; onClose: ()
                     <TableCell>Resource type</TableCell>
                     <TableCell>Status</TableCell>
                     <TableCell>Fetched so far</TableCell>
-                    <TableCell>Attempts</TableCell>
+                    <TableCell>
+                      <Tooltip title="Oracle Health only — Condition/MedicationRequest work is split into independent batches of ~10 patients each. Shows how many of this task's batches finished vs. failed.">
+                        <span>Batches</span>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title="pg-boss retry count on the task's most recent failed delivery. Resets to 0 once healthy again — this is not a running total of pages/batches processed, so 0 does not mean 'nothing happened'.">
+                        <span>Retry attempts</span>
+                      </Tooltip>
+                    </TableCell>
                     <TableCell>Last error</TableCell>
-                    <TableCell>Last updated</TableCell>
+                    <TableCell>
+                      <Tooltip title="When this task's row last changed status — not the source record's own 'last updated' timestamp.">
+                        <span>Task updated at</span>
+                      </Tooltip>
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -366,14 +380,52 @@ function JobDetailDialog({ jobId, onClose }: { jobId: string | null; onClose: ()
                     const stat = detailQuery.data.stats.find(
                       (s) => s.resourceType === task.resourceType,
                     );
+                    const batches = detailQuery.data.clinicalBatches.filter(
+                      (b) => b.resourceType === task.resourceType,
+                    );
+                    const isBatchScoped = batches.length > 0;
+                    const failedBatches = batches.filter((b) => b.status === 'FAILED');
+                    const completedBatches = batches.filter((b) => b.status === 'COMPLETED');
+                    // The parent task's own lastError is only ever set for HAPI's page-walk path —
+                    // for Oracle's batch-scoped path, fall back to the most recently failed batch's
+                    // error, otherwise this column silently shows "—" even when a batch clearly failed.
+                    const mostRecentFailedBatch = [...failedBatches].sort(
+                      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+                    )[0];
+                    const displayError = task.lastError ?? mostRecentFailedBatch?.lastError ?? null;
+
                     return (
                       <TableRow key={task.id}>
                         <TableCell>{task.resourceType}</TableCell>
                         <TableCell>{task.status}</TableCell>
                         <TableCell>{stat?.fetched ?? 0}</TableCell>
-                        <TableCell>{task.attempts}</TableCell>
-                        <TableCell>{task.lastError ?? '—'}</TableCell>
-                        <TableCell>{new Date(task.updatedAt).toLocaleTimeString()}</TableCell>
+                        <TableCell>
+                          {isBatchScoped ? (
+                            <Tooltip
+                              title={`${completedBatches.length} completed, ${failedBatches.length} failed, ${
+                                batches.length - completedBatches.length - failedBatches.length
+                              } in progress, ${batches.length} total`}
+                            >
+                              <span>
+                                {completedBatches.length}/{batches.length} OK
+                                {failedBatches.length > 0 ? `, ${failedBatches.length} failed` : ''}
+                              </span>
+                            </Tooltip>
+                          ) : (
+                            '—'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isBatchScoped ? (
+                            <Tooltip title="Batch-scoped task — see the Batches column instead; pg-boss retries apply per batch, not to this task row.">
+                              <span>—</span>
+                            </Tooltip>
+                          ) : (
+                            task.attempts
+                          )}
+                        </TableCell>
+                        <TableCell>{displayError ?? '—'}</TableCell>
+                        <TableCell>{new Date(task.updatedAt).toLocaleString()}</TableCell>
                       </TableRow>
                     );
                   })}

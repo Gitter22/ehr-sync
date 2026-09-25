@@ -98,6 +98,10 @@ export async function getSyncJob(jobId: string) {
       stats: true,
       events: { orderBy: { createdAt: 'desc' }, take: 200 },
       missingPatients: true,
+      // 'per-patient'-scoped providers (Oracle) only — the parent SyncTask's own attempts/lastError
+      // stay 0/null for these (failures are recorded per-batch, never rolled up onto the task row),
+      // so the job detail UI needs the real per-batch status/error to show anything meaningful.
+      clinicalBatches: true,
     },
   });
   if (!job) {

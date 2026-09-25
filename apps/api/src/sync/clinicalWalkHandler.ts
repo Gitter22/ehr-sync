@@ -8,7 +8,7 @@ import type { NormalizedMedicationRequest } from '../normalize/medicationRequest
 import { markTaskCancelledIfNeeded } from './cancellation';
 import { recomputeJobStatus } from './completionCheck';
 import { isMaxRecordsReached } from './maxRecordsGuard';
-import { boss, QUEUE_BACKFILL, QUEUE_CLINICAL_PAGE } from './queue';
+import { boss, queueForClinicalPage, QUEUE_BACKFILL } from './queue';
 import { RESOURCE_TYPE_CONDITION, type ClinicalResourceType } from './resourceTypes';
 import type { RetryContext } from './retryContext';
 import { recordTaskFailure } from './taskFailure';
@@ -174,7 +174,7 @@ export async function processClinicalPage(
   }
 
   if (nextUrl) {
-    await boss.send(QUEUE_CLINICAL_PAGE, { jobId, resourceType });
+    await boss.send(queueForClinicalPage(resourceType), { jobId, resourceType });
     return;
   }
 

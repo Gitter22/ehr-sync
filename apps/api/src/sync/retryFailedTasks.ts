@@ -2,22 +2,23 @@ import { createSyncLogger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import {
   boss,
+  queueForClinicalBatch,
+  queueForClinicalPage,
   QUEUE_BACKFILL,
-  QUEUE_CLINICAL_BATCH,
-  QUEUE_CLINICAL_PAGE,
   QUEUE_PATIENT_PAGE,
 } from './queue';
 import {
   RESOURCE_TYPE_CONDITION,
   RESOURCE_TYPE_MEDICATION_REQUEST,
   RESOURCE_TYPE_PATIENT,
+  type ClinicalResourceType,
 } from './resourceTypes';
 
 const log = createSyncLogger('retry');
 
 function queueFor(resourceType: string): string {
   if (resourceType === RESOURCE_TYPE_PATIENT) return QUEUE_PATIENT_PAGE;
-  return QUEUE_CLINICAL_PAGE;
+  return queueForClinicalPage(resourceType as ClinicalResourceType);
 }
 
 // Re-enqueues only FAILED tasks/batches for a job — "only the failed records can be retried" from
@@ -54,7 +55,9 @@ export async function retrySyncJob(jobId: string): Promise<{
 
   for (const batch of failedBatches) {
     await prisma.syncClinicalBatch.update({ where: { id: batch.id }, data: { status: 'PENDING' } });
-    await boss.send(QUEUE_CLINICAL_BATCH, { batchId: batch.id });
+    await boss.send(queueForClinicalBatch(batch.resourceType as ClinicalResourceType), {
+      batchId: batch.id,
+    });
   }
   if (failedBatches.length > 0) {
     // Reset the parent task too, even if it had already rolled up to COMPLETED (mixed outcome) —

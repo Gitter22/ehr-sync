@@ -47,6 +47,22 @@ export interface SyncMissingPatientRef {
   resolvedAt: string | null;
 }
 
+// 'per-patient'-scoped providers (Oracle) only — Condition/MedicationRequest work is split into
+// independent batches of ~10 patients each. The parent SyncTask's own attempts/lastError stay
+// 0/null for these resource types (failures are recorded per-batch, never rolled up onto the task
+// row), so this is the only place a real per-batch error is visible.
+export interface SyncClinicalBatch {
+  id: string;
+  jobId: string;
+  resourceType: string;
+  batchIndex: number;
+  patientFhirIds: string[];
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  attempts: number;
+  lastError: string | null;
+  updatedAt: string;
+}
+
 export interface SyncJob {
   id: string;
   displayId: number;
@@ -67,6 +83,7 @@ export interface SyncJob {
 export interface SyncJobDetail extends SyncJob {
   events: SyncJobEvent[];
   missingPatients: SyncMissingPatientRef[];
+  clinicalBatches: SyncClinicalBatch[];
 }
 
 export const ACTIVE_JOB_STATUSES: SyncJobStatus[] = ['PENDING', 'RUNNING'];

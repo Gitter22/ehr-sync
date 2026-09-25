@@ -44,14 +44,29 @@ export function AppShell({ children }: AppShellProps) {
           >
             Control Panel
           </Button>
+          <Button
+            color="inherit"
+            component={Link}
+            to="/how-this-works"
+            sx={{ fontWeight: location.pathname === '/how-this-works' ? 700 : 400 }}
+          >
+            How this works
+          </Button>
         </Toolbar>
       </AppBar>
       <Box
         component="main"
         sx={{
           flex: 1,
+          // Bounded height comes from `flex: 1` inside the height:100vh column above, regardless
+          // of this box's own overflow value — `auto` here just means pages that don't constrain
+          // their own height (Control Panel, How this works) scroll normally at the page level.
+          // Only the Patients page needs the "only the inner table scrolls, header stays sticky"
+          // behavior, and it achieves that itself (its own height:'100%' + inner overflow:'auto'
+          // TableContainer) — it was never something this shared shell should have enforced on
+          // every page via `overflow: 'hidden'` here.
           minHeight: 0,
-          overflow: 'hidden',
+          overflow: 'auto',
           display: 'flex',
           flexDirection: 'column',
           p: 3,
