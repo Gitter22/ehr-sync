@@ -15,3 +15,12 @@ export async function markTaskCancelledIfNeeded(
     data: { status: 'CANCELLED' },
   });
 }
+
+// Same idea, for a single 'per-patient'-scoped batch (Oracle) — called from
+// clinicalBatchHandler.ts right after loading the batch, before any FHIR HTTP call.
+export async function markBatchCancelledIfNeeded(batchId: string): Promise<void> {
+  await prisma.syncClinicalBatch.updateMany({
+    where: { id: batchId, status: { in: ['PENDING', 'RUNNING'] } },
+    data: { status: 'CANCELLED' },
+  });
+}

@@ -1,8 +1,11 @@
 import { Prisma } from '../../../../generated/prisma';
 import { getProvider } from '../fhir/providers/registry';
+import { createSyncLogger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { boss, QUEUE_PATIENT_PAGE } from './queue';
 import { RESOURCE_TYPE_PATIENT } from './resourceTypes';
+
+const log = createSyncLogger('orchestrator');
 
 const ACTIVE_JOB_STATUSES = ['PENDING', 'RUNNING'] as const;
 
@@ -32,7 +35,20 @@ export function buildResourceSearchUrl(
   return getProvider(source).buildSearchUrl(resourceType, watermark);
 }
 
-export async function startSyncJob(source: string, triggeredBy = 'manual') {
+export interface StartSyncJobOptions {
+  // HAPI only — 'none' forces a full sync (ignore watermark); a Date uses it directly; omitted
+  // uses today's default (computeWatermark). Meaningless for other providers (Oracle's Patient
+  // search never supports watermark filtering regardless), so simply ignored for them.
+  watermarkOverride?: 'none' | Date;
+  // HAPI only — see the field's doc comment in schema.prisma.
+  maxRecordsPerTask?: number;
+}
+
+export async function startSyncJob(
+  source: string,
+  triggeredBy = 'manual',
+  options: StartSyncJobOptions = {},
+) {
   // Fast, friendly rejection path — the partial unique index (migration
   // add_one_active_job_per_source_index) is the real correctness backstop for a race between two
   // near-simultaneous requests; this check just avoids hitting that constraint in the common case.
@@ -43,7 +59,19 @@ export async function startSyncJob(source: string, triggeredBy = 'manual') {
     throw new SyncJobInProgressError(existingActive.id);
   }
 
-  const watermark = await computeWatermark(source);
+  // 'per-patient'-scoped providers (Oracle): Patient search itself can never be watermark-filtered,
+  // but job.watermark also feeds buildPatientScopedSearchUrl's `_lastUpdated` filter for every
+  // Condition/MedicationRequest batch — so once any such job's watermark got set from history, a
+  // static sandbox would start returning zero clinical records on every later run. Force null
+  // unconditionally rather than let it be reachable via computeWatermark or an override.
+  const watermark =
+    getProvider(source).clinicalSearchScope === 'per-patient'
+      ? null
+      : options.watermarkOverride === 'none'
+        ? null
+        : options.watermarkOverride instanceof Date
+          ? options.watermarkOverride
+          : await computeWatermark(source);
 
   let job;
   try {
@@ -54,6 +82,7 @@ export async function startSyncJob(source: string, triggeredBy = 'manual') {
           status: 'RUNNING',
           triggeredBy,
           watermark,
+          maxRecordsPerTask: options.maxRecordsPerTask ?? null,
           startedAt: new Date(),
         },
       });
@@ -76,6 +105,15 @@ export async function startSyncJob(source: string, triggeredBy = 'manual') {
     }
     throw error;
   }
+
+  log.info('job started', {
+    jobId: job.id,
+    displayId: job.displayId,
+    source,
+    triggeredBy,
+    watermark: watermark?.toISOString() ?? null,
+    maxRecordsPerTask: options.maxRecordsPerTask ?? null,
+  });
 
   await boss.send(QUEUE_PATIENT_PAGE, { jobId: job.id });
 

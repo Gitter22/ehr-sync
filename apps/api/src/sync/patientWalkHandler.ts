@@ -1,8 +1,11 @@
 import { getProvider } from '../fhir/providers/registry';
 import type { FhirPatient } from '../fhir/types';
+import { createSyncLogger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { markTaskCancelledIfNeeded } from './cancellation';
 import { recomputeJobStatus } from './completionCheck';
+import { dispatchClinicalBatches } from './dispatchClinicalBatches';
+import { isMaxRecordsReached } from './maxRecordsGuard';
 import { buildResourceSearchUrl } from './orchestrator';
 import { boss, QUEUE_CLINICAL_PAGE, QUEUE_PATIENT_PAGE } from './queue';
 import {
@@ -13,6 +16,8 @@ import {
 import type { RetryContext } from './retryContext';
 import { recordTaskFailure } from './taskFailure';
 import { bulkUpsertPatients, bulkUpsertRaw } from './upsert';
+
+const log = createSyncLogger('patient');
 
 // Processes exactly one Patient search page, then either re-enqueues itself for the next page or,
 // on the last page, marks the task COMPLETED and creates+enqueues the Condition/MedicationRequest
@@ -32,6 +37,7 @@ export async function processPatientPage(jobId: string, retry: RetryContext): Pr
   if (!task || (task.status !== 'PENDING' && task.status !== 'RUNNING') || !task.cursorUrl) return;
 
   const provider = getProvider(job.source);
+  log.info('fetching patient page', { jobId, source: job.source, url: task.cursorUrl });
   let nextUrl: string | null;
   try {
     const { resources, nextUrl: fetchedNextUrl } = await provider.fetchPage<FhirPatient>(
@@ -93,6 +99,10 @@ export async function processPatientPage(jobId: string, retry: RetryContext): Pr
         },
       });
 
+      if (await isMaxRecordsReached(tx, jobId, RESOURCE_TYPE_PATIENT, job.maxRecordsPerTask)) {
+        nextUrl = null; // stop here even if the server has more pages
+      }
+
       await tx.syncTask.update({
         where: { id: task.id },
         data: nextUrl
@@ -100,7 +110,18 @@ export async function processPatientPage(jobId: string, retry: RetryContext): Pr
           : { cursorUrl: null, status: 'COMPLETED', attempts: 0, lastError: null },
       });
     });
+
+    log.info('patient page done', {
+      jobId,
+      fetched: resources.length,
+      hasNextPage: nextUrl !== null,
+    });
   } catch (error) {
+    log.error('patient page failed', {
+      jobId,
+      url: task.cursorUrl,
+      error: error instanceof Error ? error.message : String(error),
+    });
     await recordTaskFailure(task.id, jobId, retry, error);
     throw error; // let pg-boss apply its own tier-2 retry/backoff for this delivery
   }
@@ -110,6 +131,7 @@ export async function processPatientPage(jobId: string, retry: RetryContext): Pr
     return;
   }
 
+  log.info('patient walk complete', { jobId, source: job.source });
   await onPatientWalkComplete(jobId, job.source, job.watermark);
 }
 
@@ -118,6 +140,15 @@ async function onPatientWalkComplete(
   source: string,
   watermark: Date | null,
 ): Promise<void> {
+  const provider = getProvider(source);
+
+  if (provider.clinicalSearchScope === 'per-patient') {
+    log.info('dispatching per-patient clinical batches', { jobId, source });
+    await dispatchClinicalBatches(jobId);
+    await recomputeJobStatus(jobId);
+    return;
+  }
+
   for (const resourceType of [RESOURCE_TYPE_CONDITION, RESOURCE_TYPE_MEDICATION_REQUEST]) {
     // Idempotent: if a duplicate delivery re-runs this after the tasks were already created,
     // skip rather than error or duplicate.
@@ -134,6 +165,7 @@ async function onPatientWalkComplete(
         cursorUrl: buildResourceSearchUrl(source, resourceType, watermark),
       },
     });
+    log.info('clinical task created', { jobId, resourceType });
     await boss.send(QUEUE_CLINICAL_PAGE, { jobId, resourceType });
   }
 

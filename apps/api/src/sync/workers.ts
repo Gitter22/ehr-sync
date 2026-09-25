@@ -1,8 +1,15 @@
 import type PgBoss from 'pg-boss';
 import { processBackfill } from './backfillHandler';
+import { processClinicalBatch } from './clinicalBatchHandler';
 import { processClinicalPage } from './clinicalWalkHandler';
 import { processPatientPage } from './patientWalkHandler';
-import { boss, QUEUE_BACKFILL, QUEUE_CLINICAL_PAGE, QUEUE_PATIENT_PAGE } from './queue';
+import {
+  boss,
+  QUEUE_BACKFILL,
+  QUEUE_CLINICAL_BATCH,
+  QUEUE_CLINICAL_PAGE,
+  QUEUE_PATIENT_PAGE,
+} from './queue';
 import type { ClinicalResourceType } from './resourceTypes';
 import type { RetryContext } from './retryContext';
 
@@ -17,6 +24,10 @@ interface ClinicalPageData {
 
 interface BackfillData {
   jobId: string;
+}
+
+interface ClinicalBatchData {
+  batchId: string;
 }
 
 // One job at a time per queue — each handler already processes exactly one page (or drains one
@@ -49,6 +60,12 @@ export async function registerWorkers(): Promise<void> {
   await boss.work<BackfillData>(QUEUE_BACKFILL, WORK_OPTIONS, async (jobs) => {
     for (const job of jobs) {
       await processBackfill(job.data.jobId);
+    }
+  });
+
+  await boss.work<ClinicalBatchData>(QUEUE_CLINICAL_BATCH, WORK_OPTIONS, async (jobs) => {
+    for (const job of jobs) {
+      await processClinicalBatch(job.data.batchId, retryContextOf(job));
     }
   });
 }

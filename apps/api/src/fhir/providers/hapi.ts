@@ -34,6 +34,12 @@ export const hapiProvider: FhirProvider = {
     return response.data;
   },
 
+  clinicalSearchScope: 'global',
+
+  buildPatientScopedSearchUrl() {
+    throw new Error('hapiProvider is globally-scoped — buildPatientScopedSearchUrl is not used');
+  },
+
   normalizePatient,
   normalizeCondition,
   normalizeMedicationRequest,

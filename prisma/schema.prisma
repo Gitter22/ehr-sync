@@ -45,6 +45,14 @@ enum MissingPatientStatus {
   FAILED
 }
 
+enum SyncClinicalBatchStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 /// Single source of truth for the exact payload the source API returned.
 /// Written unconditionally, for every resource type, with no dependency on
 /// anything else — this is what makes the missing-patient reconciliation possible.
@@ -142,6 +150,25 @@ model SyncTask {
   @@unique([jobId, resourceType])
 }
 
+/// Used only by 'per-patient'-scoped providers (Oracle) — HAPI's 'global' scope never creates
+/// these. Batches are independent, pre-created all at once (not a sequential cursor walk) once
+/// the Patient task completes, so retrying one never affects the others. No cursor *within* a
+/// batch — a retry re-does the whole (small) patient list, which is cheap and idempotent.
+model SyncClinicalBatch {
+  id             String                   @id @default(uuid())
+  jobId          String
+  job            SyncJob                  @relation(fields: [jobId], references: [id])
+  resourceType   String
+  batchIndex     Int
+  patientFhirIds String[]
+  status         SyncClinicalBatchStatus  @default(PENDING)
+  attempts       Int                      @default(0)
+  lastError      String?
+  updatedAt      DateTime                 @updatedAt
+
+  @@unique([jobId, resourceType, batchIndex])
+}
+
 /// A patient referenced by a Condition/MedicationRequest but not yet locally
 /// saved, for this job. Drained by the backfill step.
 model SyncMissingPatientRef {
@@ -175,6 +202,11 @@ model SyncJob {
   /// PARTIAL job (some bad records) still fully scanned its search results and is a safe
   /// incremental checkpoint; a job where a task itself FAILED did not, and is not.
   allTasksCompleted Boolean                @default(false)
+  /// HAPI only — per-job cap applied uniformly across all tasks: once a task's SyncJobStat.fetched
+  /// reaches this, that task stops early (marks itself COMPLETED) even with pages remaining. A job
+  /// with this set is NEVER watermark-eligible (allTasksCompleted forced false), since a
+  /// deliberately truncated run can't be trusted as "we saw everything up to here".
+  maxRecordsPerTask Int?
   startedAt       DateTime?
   finishedAt      DateTime?
   errorMessage    String?
@@ -183,6 +215,7 @@ model SyncJob {
   stats           SyncJobStat[]
   events          SyncJobEvent[]
   missingPatients SyncMissingPatientRef[]
+  clinicalBatches SyncClinicalBatch[]
 }
 
 model SyncJobStat {

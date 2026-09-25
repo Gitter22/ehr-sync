@@ -33,6 +33,7 @@ import {
   retrySyncJob,
   startSync,
   type EhrSource,
+  type StartSyncOptions,
   type SyncJob,
   type SyncJobStatus,
 } from '../api/sync';
@@ -40,9 +41,11 @@ import { useConnectivityStore } from '../store/connectivityStore';
 
 const SOURCE_OPTIONS: { value: EhrSource; label: string; available: boolean }[] = [
   { value: 'HAPI_FHIR', label: 'HAPI FHIR', available: true },
-  { value: 'ORACLE_HEALTH', label: 'Oracle Health', available: false },
+  { value: 'ORACLE_HEALTH', label: 'Oracle Health', available: true },
   { value: 'EPIC', label: 'Epic', available: false },
 ];
+
+type LastUpdatedMode = 'default' | 'full' | 'custom';
 
 const STATUS_COLOR: Record<SyncJobStatus, 'default' | 'info' | 'success' | 'error' | 'warning'> = {
   PENDING: 'info',
@@ -61,6 +64,12 @@ export function ControlPanelPage() {
   const queryClient = useQueryClient();
   const [source, setSource] = useState<EhrSource>('HAPI_FHIR');
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
+  // "Last updated" is HAPI-only (Oracle's Patient search never supports watermark filtering
+  // regardless). "Max records" applies to both HAPI and Oracle — for Oracle it caps the Patient
+  // task, which proportionally shrinks the downstream Condition/MedicationRequest batches too.
+  const [lastUpdatedMode, setLastUpdatedMode] = useState<LastUpdatedMode>('default');
+  const [customDate, setCustomDate] = useState('');
+  const [maxRecords, setMaxRecords] = useState('');
 
   const [startedJob, setStartedJob] = useState<{ jobId: string; displayId: number } | null>(null);
 
@@ -83,7 +92,20 @@ export function ControlPanelPage() {
   }, [jobs, startedJob]);
 
   const startMutation = useMutation({
-    mutationFn: () => startSync(source),
+    mutationFn: () => {
+      const options: StartSyncOptions = {};
+      if (source === 'HAPI_FHIR') {
+        if (lastUpdatedMode === 'full') {
+          options.lastUpdatedOverride = null;
+        } else if (lastUpdatedMode === 'custom' && customDate) {
+          options.lastUpdatedOverride = new Date(customDate).toISOString();
+        }
+      }
+      if ((source === 'HAPI_FHIR' || source === 'ORACLE_HEALTH') && maxRecords.trim()) {
+        options.maxRecords = Number(maxRecords);
+      }
+      return startSync(source, options);
+    },
     onSuccess: (data) => {
       setStartedJob({ jobId: data.jobId, displayId: data.displayId });
       queryClient.invalidateQueries({ queryKey: ['syncJobs'] });
@@ -119,7 +141,7 @@ export function ControlPanelPage() {
         <Stack
           direction={{ xs: 'column', sm: 'row' }}
           spacing={2}
-          sx={{ alignItems: { sm: 'center' } }}
+          sx={{ alignItems: { sm: 'flex-start' }, flexWrap: 'wrap' }}
         >
           <TextField
             select
@@ -136,12 +158,54 @@ export function ControlPanelPage() {
               </MenuItem>
             ))}
           </TextField>
+
+          {source === 'HAPI_FHIR' && (
+            <>
+              <TextField
+                select
+                label="Last updated"
+                size="small"
+                value={lastUpdatedMode}
+                onChange={(e) => setLastUpdatedMode(e.target.value as LastUpdatedMode)}
+                sx={{ minWidth: 220 }}
+              >
+                <MenuItem value="default">Default (since last successful sync)</MenuItem>
+                <MenuItem value="full">Full sync (ignore watermark)</MenuItem>
+                <MenuItem value="custom">Custom date…</MenuItem>
+              </TextField>
+              {lastUpdatedMode === 'custom' && (
+                <TextField
+                  label="Changes since"
+                  type="date"
+                  size="small"
+                  value={customDate}
+                  onChange={(e) => setCustomDate(e.target.value)}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  sx={{ minWidth: 180 }}
+                />
+              )}
+            </>
+          )}
+
+          {(source === 'HAPI_FHIR' || source === 'ORACLE_HEALTH') && (
+            <TextField
+              label="Max records"
+              type="number"
+              size="small"
+              value={maxRecords}
+              onChange={(e) => setMaxRecords(e.target.value)}
+              placeholder="Unbounded"
+              sx={{ minWidth: 140 }}
+            />
+          )}
+
           <Button
             variant="contained"
             onClick={() => startMutation.mutate()}
             disabled={startMutation.isPending}
+            sx={{ mt: { xs: 0, sm: '4px' } }}
           >
-            {startMutation.isPending ? 'Starting…' : 'Start sync'}
+            {startMutation.isPending ? 'Creating…' : 'Create sync'}
           </Button>
         </Stack>
         {startMutation.isError && (
@@ -182,7 +246,16 @@ export function ControlPanelPage() {
                 <TableRow key={job.id} hover>
                   <TableCell>#{job.displayId}</TableCell>
                   <TableCell>
-                    <Chip label={job.status} size="small" color={STATUS_COLOR[job.status]} />
+                    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                      <Chip label={job.status} size="small" color={STATUS_COLOR[job.status]} />
+                      {job.maxRecordsPerTask != null && (
+                        <Chip
+                          label={`capped ${job.maxRecordsPerTask}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>{job.source}</TableCell>
                   <TableCell>

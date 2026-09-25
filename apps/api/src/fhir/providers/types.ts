@@ -22,6 +22,21 @@ export interface FhirProvider {
   // references a patient not yet saved locally.
   fetchPatientById(fhirId: string): Promise<FhirPatient>;
 
+  // Whether Condition/MedicationRequest support an unscoped, patient-independent `_lastUpdated`
+  // search (HAPI: yes — 'global'). If a provider's API requires patient/subject/_id scoping on
+  // those resources (Oracle does — confirmed, not assumed), it's 'per-patient': the sync engine
+  // fans out per already-known patient instead of walking one global search.
+  clinicalSearchScope: 'global' | 'per-patient';
+
+  // Only called for 'per-patient' providers. Builds a search URL scoped to one patient, with
+  // `_lastUpdated` applied when a watermark exists (still a real optimization even though Patient
+  // discovery itself can't be watermark-filtered for such providers).
+  buildPatientScopedSearchUrl(
+    resourceType: string,
+    patientFhirId: string,
+    watermark: Date | null,
+  ): string;
+
   // Normalize functions default to the shared FHIR-R4-shape implementations in `normalize/*.ts`
   // (Patient/Condition/MedicationRequest's common fields are spec-defined, not vendor-specific),
   // but each provider references its own copy here so it can override any of them once real

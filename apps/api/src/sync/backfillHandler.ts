@@ -1,6 +1,7 @@
 import { Prisma } from '../../../../generated/prisma';
 import { getProvider } from '../fhir/providers/registry';
 import type { FhirCondition, FhirMedicationRequest } from '../fhir/types';
+import { createSyncLogger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { recomputeJobStatus } from './completionCheck';
 import {
@@ -9,6 +10,8 @@ import {
   bulkUpsertPatients,
   bulkUpsertRaw,
 } from './upsert';
+
+const log = createSyncLogger('backfill');
 
 // Drains every PENDING SyncMissingPatientRef for a job: fetches each missing patient
 // individually, saves them, then reconciles — normalizes any already-stored raw
@@ -22,6 +25,9 @@ export async function processBackfill(jobId: string): Promise<void> {
   const pending = await prisma.syncMissingPatientRef.findMany({
     where: { jobId, status: 'PENDING' },
   });
+  if (pending.length > 0) {
+    log.info('backfill started', { jobId, pendingPatients: pending.length });
+  }
 
   for (const ref of pending) {
     // Re-checked per ref (not just once up front) so a cancel mid-drain stops promptly rather
@@ -48,7 +54,14 @@ export async function processBackfill(jobId: string): Promise<void> {
         });
         await reconcilePatientClinicalData(tx, ref.source, ref.patientFhirId, jobId);
       });
+      log.info('patient backfilled', { jobId, patientFhirId: ref.patientFhirId });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error('patient backfill failed', {
+        jobId,
+        patientFhirId: ref.patientFhirId,
+        error: message,
+      });
       await prisma.syncMissingPatientRef
         .update({ where: { id: ref.id }, data: { status: 'FAILED' } })
         .catch(() => undefined);
@@ -57,7 +70,7 @@ export async function processBackfill(jobId: string): Promise<void> {
           jobId,
           level: 'error',
           message: `Backfill failed for patient ${ref.patientFhirId}`,
-          context: { error: error instanceof Error ? error.message : String(error) },
+          context: { error: message },
         },
       });
     }

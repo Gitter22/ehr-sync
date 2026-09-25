@@ -18,6 +18,8 @@ export interface Patient {
   sourceLastUpdated: string | null;
   createdAt: string;
   updatedAt: string;
+  conditionCount: number;
+  medicationRequestCount: number;
 }
 
 export interface Condition {

@@ -55,6 +55,7 @@ export interface SyncJob {
   triggeredBy: string | null;
   watermark: string | null;
   allTasksCompleted: boolean;
+  maxRecordsPerTask: number | null;
   startedAt: string | null;
   finishedAt: string | null;
   errorMessage: string | null;
@@ -70,9 +71,23 @@ export interface SyncJobDetail extends SyncJob {
 
 export const ACTIVE_JOB_STATUSES: SyncJobStatus[] = ['PENDING', 'RUNNING'];
 
-export async function startSync(source: EhrSource): Promise<{ jobId: string; displayId: number }> {
+export interface StartSyncOptions {
+  // HAPI only — omitted: today's default (last successful job's startedAt); explicit null: force
+  // a full sync; ISO date string: use that as the watermark directly. Ignored for other sources.
+  lastUpdatedOverride?: string | null;
+  // HAPI and Oracle Health — per-job cap applied to the Patient task's record count. For Oracle
+  // this also proportionally shrinks the downstream Condition/MedicationRequest batches, since
+  // those are only ever created for patients actually synced this job. Ignored for other sources.
+  maxRecords?: number;
+}
+
+export async function startSync(
+  source: EhrSource,
+  options: StartSyncOptions = {},
+): Promise<{ jobId: string; displayId: number }> {
   const { data } = await apiClient.post<{ jobId: string; displayId: number }>('/api/sync', {
     source,
+    ...options,
   });
   return data;
 }

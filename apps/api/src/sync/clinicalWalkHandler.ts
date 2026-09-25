@@ -1,11 +1,13 @@
 import { getProvider } from '../fhir/providers/registry';
 import type { FhirProvider } from '../fhir/providers/types';
 import type { FhirCondition, FhirMedicationRequest, FhirResource } from '../fhir/types';
+import { createSyncLogger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import type { NormalizedCondition } from '../normalize/condition';
 import type { NormalizedMedicationRequest } from '../normalize/medicationRequest';
 import { markTaskCancelledIfNeeded } from './cancellation';
 import { recomputeJobStatus } from './completionCheck';
+import { isMaxRecordsReached } from './maxRecordsGuard';
 import { boss, QUEUE_BACKFILL, QUEUE_CLINICAL_PAGE } from './queue';
 import { RESOURCE_TYPE_CONDITION, type ClinicalResourceType } from './resourceTypes';
 import type { RetryContext } from './retryContext';
@@ -17,6 +19,8 @@ import {
   bulkUpsertRaw,
   resolvePatientIds,
 } from './upsert';
+
+const log = createSyncLogger('clinical');
 
 type NormalizedClinicalRecord = NormalizedCondition | NormalizedMedicationRequest;
 
@@ -53,6 +57,7 @@ export async function processClinicalPage(
   if (!task || (task.status !== 'PENDING' && task.status !== 'RUNNING') || !task.cursorUrl) return;
 
   const provider = getProvider(job.source);
+  log.info('fetching clinical page', { jobId, resourceType, url: task.cursorUrl });
   let nextUrl: string | null;
   let missingPatientCount = 0;
 
@@ -134,6 +139,10 @@ export async function processClinicalPage(
         },
       });
 
+      if (await isMaxRecordsReached(tx, jobId, resourceType, job.maxRecordsPerTask)) {
+        nextUrl = null; // stop here even if the server has more pages
+      }
+
       await tx.syncTask.update({
         where: { id: task.id },
         data: nextUrl
@@ -141,7 +150,21 @@ export async function processClinicalPage(
           : { cursorUrl: null, status: 'COMPLETED', attempts: 0, lastError: null },
       });
     });
+
+    log.info('clinical page done', {
+      jobId,
+      resourceType,
+      fetched: resources.length,
+      missingPatients: missingPatientCount,
+      hasNextPage: nextUrl !== null,
+    });
   } catch (error) {
+    log.error('clinical page failed', {
+      jobId,
+      resourceType,
+      url: task.cursorUrl,
+      error: error instanceof Error ? error.message : String(error),
+    });
     await recordTaskFailure(task.id, jobId, retry, error);
     throw error; // let pg-boss apply its own tier-2 retry/backoff for this delivery
   }
@@ -155,5 +178,6 @@ export async function processClinicalPage(
     return;
   }
 
+  log.info('clinical task complete', { jobId, resourceType });
   await recomputeJobStatus(jobId);
 }

@@ -116,11 +116,13 @@ export function PatientsPage() {
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell>Full name</TableCell>
-                <TableCell>FHIR ID</TableCell>
                 <TableCell>Source</TableCell>
+                <TableCell>FHIR ID</TableCell>
+                <TableCell>Full name</TableCell>
                 <TableCell>Gender</TableCell>
                 <TableCell>Birth date</TableCell>
+                <TableCell align="right">Conditions</TableCell>
+                <TableCell align="right">Medications</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -131,20 +133,22 @@ export function PatientsPage() {
                   onClick={() => navigate(`/patients/${patient.id}`)}
                   sx={{ cursor: 'pointer' }}
                 >
-                  <TableCell>{patient.fullName ?? '—'}</TableCell>
-                  <TableCell>{patient.fhirId}</TableCell>
                   <TableCell>
                     <Chip label={patient.source} size="small" />
                   </TableCell>
+                  <TableCell>{patient.fhirId}</TableCell>
+                  <TableCell>{patient.fullName ?? '—'}</TableCell>
                   <TableCell>{patient.gender ?? '—'}</TableCell>
                   <TableCell>
                     {patient.birthDate ? new Date(patient.birthDate).toLocaleDateString() : '—'}
                   </TableCell>
+                  <TableCell align="right">{patient.conditionCount}</TableCell>
+                  <TableCell align="right">{patient.medicationRequestCount}</TableCell>
                 </TableRow>
               ))}
               {!isLoading && (data?.rows.length ?? 0) === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5}>
+                  <TableCell colSpan={7}>
                     <Box sx={{ py: 4, textAlign: 'center' }}>
                       <Typography color="text.secondary">No patients found</Typography>
                     </Box>

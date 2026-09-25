@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { env } from '../../config/env';
 import { normalizeCondition } from '../../normalize/condition';
 import { normalizeMedicationRequest } from '../../normalize/medicationRequest';
@@ -7,104 +6,72 @@ import { createFhirHttpClient } from '../httpClient';
 import { buildSearchUrl, fetchPageWith } from '../pagination';
 import { createRateLimiter } from '../rateLimiter';
 import type { FhirPatient, FhirResource } from '../types';
-import { ProviderNotConfiguredError, type FhirProvider } from './types';
+import type { FhirProvider } from './types';
 
-// Oracle Health (Cerner) — unlike the public HAPI sandbox, this needs real credentials we don't
-// have in this environment, so nothing here has been exercised against an actual server yet. It's
-// structurally complete (own client, own auth, own default query params, own rate limiter) so
-// plugging in real values is the only thing left; every TODO below marks something that needs
-// verifying against a real sandbox response, the same way HAPI's normalize/*.ts was built against
-// the specs/*.json samples.
+// Oracle Health (Cerner) public "open sandbox" — verified live against
+// https://fhir-open.cerner.com/r4/ec2458f2-1e24-41c8-b71b-0e701af7583d during planning, not just
+// inferred from docs:
+//   - No auth: every call below succeeds with only an Accept header.
+//   - Patient search has NO unscoped listing — `_count`/`_lastUpdated` alone both return a 400
+//     ("at least one of _id, identifier, name, family, given, birthdate, phone, email,
+//     address-postalcode, or -pageContext must be provided"). `ORACLE_PATIENT_SEARCH_QUERY`
+//     supplies that required criterion; Patient can never be `_lastUpdated`-filtered.
+//   - Condition/MedicationRequest require patient/subject/_id scoping (confirmed via a live 400)
+//     and reject comma-separated patient batching ("multiple values for query parameter is not
+//     supported") — hence `clinicalSearchScope: 'per-patient'`, one real API call per patient.
+//   - `_lastUpdated` DOES work once patient-scoped (confirmed 200), so clinical data can still be
+//     incrementally filtered even though patient discovery can't be.
+//   - Bundle `link[rel=next]` pagination works normally once a query has real results (confirmed
+//     for both Patient and MedicationRequest) — reuses the same generic fetchPageWith as HAPI.
+const client = createFhirHttpClient(env.oracleFhirBaseUrl);
+const limiter = createRateLimiter();
 
-function requireConfig() {
-  const { oracleFhirBaseUrl, oracleTokenUrl, oracleClientId, oracleClientSecret } = env;
-  if (!oracleFhirBaseUrl || !oracleTokenUrl || !oracleClientId || !oracleClientSecret) {
-    throw new ProviderNotConfiguredError(
-      'Oracle Health provider is not configured — set ORACLE_FHIR_BASE_URL, ORACLE_TOKEN_URL, ' +
-        'ORACLE_CLIENT_ID, and ORACLE_CLIENT_SECRET to use source=ORACLE_HEALTH.',
-    );
-  }
-  return { oracleFhirBaseUrl, oracleTokenUrl, oracleClientId, oracleClientSecret };
-}
-
-// Lazily constructed — module load must never throw just because Oracle isn't configured, since
-// the rest of the app (and the HAPI provider) has to keep working without it.
-let client: ReturnType<typeof createFhirHttpClient> | undefined;
-let limiter: ReturnType<typeof createRateLimiter> | undefined;
-let cachedToken: { accessToken: string; expiresAt: number } | null = null;
-
-// SMART-on-FHIR backend-services client-credentials grant — the standard pattern for
-// system-to-system FHIR access. TODO: confirm this matches Oracle Health's actual token endpoint
-// contract (grant type, scope string, credential delivery) once real sandbox access exists.
-async function getAccessToken(): Promise<string> {
-  const { oracleTokenUrl, oracleClientId, oracleClientSecret } = requireConfig();
-
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) {
-    return cachedToken.accessToken;
-  }
-
-  const response = await axios.post<{ access_token: string; expires_in: number }>(
-    oracleTokenUrl,
-    new URLSearchParams({ grant_type: 'client_credentials', scope: 'system/*.read' }),
-    {
-      auth: { username: oracleClientId, password: oracleClientSecret },
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    },
-  );
-
-  cachedToken = {
-    accessToken: response.data.access_token,
-    expiresAt: Date.now() + response.data.expires_in * 1000,
-  };
-  return cachedToken.accessToken;
-}
-
-function getClient() {
-  if (!client) {
-    const { oracleFhirBaseUrl } = requireConfig();
-    client = createFhirHttpClient(oracleFhirBaseUrl);
-    client.interceptors.request.use(async (config) => {
-      config.headers.set('Authorization', `Bearer ${await getAccessToken()}`);
-      return config;
-    });
-  }
-  return client;
-}
-
-function getLimiter() {
-  if (!limiter) limiter = createRateLimiter();
-  return limiter;
+// ORACLE_PATIENT_SEARCH_QUERY is a raw querystring fragment (e.g. "family=smart&given=joe") — may
+// hold more than one param, so parse it properly rather than a naive single split('=').
+function parseConfiguredQuery(raw: string): Record<string, string> {
+  return Object.fromEntries(new URLSearchParams(raw));
 }
 
 export const oracleProvider: FhirProvider = {
-  buildSearchUrl(resourceType, watermark) {
-    const { oracleFhirBaseUrl } = requireConfig();
-    // TODO: confirm Oracle Health's sandbox supports `_summary=data` the same way HAPI's does —
-    // defaulting to just `_count` until verified against a real response, so we don't silently
-    // assume a query param that gets ignored (or rejected) by a different server.
-    const params: Record<string, string> = { _count: '50' };
-    if (watermark) {
-      params['_lastUpdated'] = `gt${watermark.toISOString()}`;
-    }
-    return buildSearchUrl(oracleFhirBaseUrl, resourceType, params);
+  buildSearchUrl(resourceType) {
+    // watermark intentionally ignored — Patient has no _lastUpdated support on this server.
+    return buildSearchUrl(
+      env.oracleFhirBaseUrl,
+      resourceType,
+      parseConfiguredQuery(env.oraclePatientSearchQuery),
+    );
   },
 
   fetchPage<T extends FhirResource>(url: string) {
-    return fetchPageWith<T>(getClient(), getLimiter(), url);
+    return fetchPageWith<T>(client, limiter, url);
   },
 
   async fetchPatientById(fhirId: string): Promise<FhirPatient> {
-    const response = await getLimiter().schedule(() =>
-      getClient().get<FhirPatient>(`/Patient/${fhirId}`),
+    const response = await limiter.schedule(() =>
+      client.get<FhirPatient>(`/Patient`, { params: { _id: fhirId } }),
     );
-    return response.data;
+    const bundle = response.data as unknown as { entry?: { resource: FhirPatient }[] };
+    const patient = bundle.entry?.[0]?.resource;
+    if (!patient) {
+      throw new Error(`Oracle Health: Patient ${fhirId} not found`);
+    }
+    return patient;
   },
 
-  // Patient/Condition/MedicationRequest's common fields are FHIR R4-spec-defined, so the shared
-  // normalize functions are a reasonable default for any compliant server — but they're UNVERIFIED
-  // against real Oracle Health responses (unlike HAPI's, built directly against specs/*.json
-  // samples). Swap any of these three for an Oracle-specific implementation the moment real
-  // sandbox data reveals a mapping gap; nothing else in the sync engine needs to change to do that.
+  clinicalSearchScope: 'per-patient',
+
+  buildPatientScopedSearchUrl(resourceType, patientFhirId, watermark) {
+    const params: Record<string, string> = { patient: patientFhirId };
+    if (watermark) {
+      params['_lastUpdated'] = `gt${watermark.toISOString()}`;
+    }
+    return buildSearchUrl(env.oracleFhirBaseUrl, resourceType, params);
+  },
+
+  // Verified field-by-field against specs/oracle-health/*.md real sample responses — every field
+  // these read (name[0].text, identifier[0], code.coding[0], subject.reference,
+  // dosageInstruction[0], etc.) is present with the same shape HAPI's samples use. No overrides
+  // needed for the fields we currently track.
   normalizePatient,
   normalizeCondition,
   normalizeMedicationRequest,

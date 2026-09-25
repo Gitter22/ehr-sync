@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import {
   InvalidSourceError,
+  InvalidSyncOptionsError,
   JobAlreadyInProgressError,
   JobNotCancellableError,
   JobNotFoundError,
@@ -10,6 +11,7 @@ import {
   listSyncJobs,
   retrySync,
   triggerSync,
+  type TriggerSyncInput,
 } from '../services/syncService';
 
 export async function postStartSync(req: Request, res: Response, next: NextFunction) {
@@ -19,10 +21,29 @@ export async function postStartSync(req: Request, res: Response, next: NextFunct
       res.status(400).json({ error: 'body.source is required' });
       return;
     }
-    const job = await triggerSync(source);
+
+    const lastUpdatedOverride = req.body?.lastUpdatedOverride;
+    if (
+      lastUpdatedOverride !== undefined &&
+      lastUpdatedOverride !== null &&
+      typeof lastUpdatedOverride !== 'string'
+    ) {
+      res
+        .status(400)
+        .json({ error: 'body.lastUpdatedOverride must be a string, null, or omitted' });
+      return;
+    }
+    const maxRecords = req.body?.maxRecords;
+    if (maxRecords !== undefined && typeof maxRecords !== 'number') {
+      res.status(400).json({ error: 'body.maxRecords must be a number or omitted' });
+      return;
+    }
+    const input: TriggerSyncInput = { lastUpdatedOverride, maxRecords };
+
+    const job = await triggerSync(source, input);
     res.status(202).json({ jobId: job.id, displayId: job.displayId });
   } catch (error) {
-    if (error instanceof InvalidSourceError) {
+    if (error instanceof InvalidSourceError || error instanceof InvalidSyncOptionsError) {
       res.status(400).json({ error: error.message });
       return;
     }

@@ -40,22 +40,36 @@ export interface PatientListFilters {
 export async function listPatients(
   filters: PatientListFilters,
   pagination: Pagination,
-): Promise<PaginatedResult<Awaited<ReturnType<typeof prisma.patient.findFirst>>>> {
+): Promise<
+  PaginatedResult<
+    NonNullable<Awaited<ReturnType<typeof prisma.patient.findFirst>>> & {
+      conditionCount: number;
+      medicationRequestCount: number;
+    }
+  >
+> {
   const where = {
     ...(contains(filters.fullName) ? { fullName: contains(filters.fullName) } : {}),
     ...(contains(filters.fhirId) ? { fhirId: contains(filters.fhirId) } : {}),
     ...(filters.source ? { source: filters.source as never } : {}),
   };
 
-  const [rows, total] = await Promise.all([
+  const [patients, total] = await Promise.all([
     prisma.patient.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       skip: (pagination.page - 1) * pagination.pageSize,
       take: pagination.pageSize,
+      include: { _count: { select: { conditions: true, medicationRequests: true } } },
     }),
     prisma.patient.count({ where }),
   ]);
+
+  const rows = patients.map(({ _count, ...patient }) => ({
+    ...patient,
+    conditionCount: _count.conditions,
+    medicationRequestCount: _count.medicationRequests,
+  }));
 
   return { rows, total, page: pagination.page, pageSize: pagination.pageSize };
 }

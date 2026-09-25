@@ -20,10 +20,12 @@ export const env = {
   pythonServiceUrl: process.env.PYTHON_SERVICE_URL ?? 'http://localhost:8000',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   hapiFhirBaseUrl: process.env.HAPI_FHIR_BASE_URL ?? 'https://hapi.fhir.org/baseR4',
-  // Oracle Health provider — all optional. The provider itself reports a clear "not configured"
-  // error at the point of use if any of these are missing; the app must keep running without them.
-  oracleFhirBaseUrl: process.env.ORACLE_FHIR_BASE_URL,
-  oracleTokenUrl: process.env.ORACLE_TOKEN_URL,
-  oracleClientId: process.env.ORACLE_CLIENT_ID,
-  oracleClientSecret: process.env.ORACLE_CLIENT_SECRET,
+  // Oracle Health provider — Cerner's public "open sandbox", no auth (verified live: every call
+  // succeeds with just an Accept header). Patient search has no unscoped listing (confirmed via a
+  // live 400 — see fhir/providers/oracle.ts), so a real search criterion is required; this is a
+  // single server-configured default, not a per-request parameter.
+  oracleFhirBaseUrl:
+    process.env.ORACLE_FHIR_BASE_URL ??
+    'https://fhir-open.cerner.com/r4/ec2458f2-1e24-41c8-b71b-0e701af7583d',
+  oraclePatientSearchQuery: process.env.ORACLE_PATIENT_SEARCH_QUERY ?? 'family=smart',
 };
